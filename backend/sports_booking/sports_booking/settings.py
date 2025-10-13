@@ -284,11 +284,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'
 
-"""# External service configurations
-GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
-TWILIO_ACCOUNT_SID = config('TWILIO_ACCOUNT_SID', default='AC9c9e70aeb1d21b561fd034eb0d195557')
-TWILIO_AUTH_TOKEN = config('TWILIO_AUTH_TOKEN', default='d99aa689a1608214c71631060727ea7c')
-TWILIO_PHONE_NUMBER = config('TWILIO_PHONE_NUMBER', default='+17744855386')"""
 
 """account_sid = os.getenv("TWILIO_ACCOUNT_SID")
 auth_token = os.getenv("TWILIO_AUTH_TOKEN")
