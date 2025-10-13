@@ -296,7 +296,6 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 
 # Email settings
-DEFAULT_FROM_EMAIL = 'gauravmanjunath25@gmail.com'
 
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 if EMAIL_BACKEND != 'django.core.mail.backends.console.EmailBackend':
