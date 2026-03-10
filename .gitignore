@@ -1,0 +1,14 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+logs/
+
+# VS Code
+.vscode/
+
+# Celery
+celerybeat-schedule*
