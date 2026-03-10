@@ -6,55 +6,55 @@ from bookings.serializers import BookingSerializer
 
 class PaymentSerializer(serializers.ModelSerializer):
     
-    booking_details = BookingSerializer(source='booking', read_only=True)
-    time_remaining = serializers.SerializerMethodField()
-    security_status = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Payment
-        fields = [
-            'id', 'transaction_id', 'amount', 'payment_method', 'status',
-            'expires_at', 'created_at', 'booking', 'booking_details',
-            'time_remaining', 'security_status'
-        ]
-        read_only_fields = [
-            'id', 'transaction_id', 'created_at', 'expires_at'
-        ]
-    
-    """def get_booking_details(self, obj):
-        from bookings.serializers import BookingSerializer
-        return BookingSerializer(obj.booking).data"""
-    
-    def get_time_remaining(self, obj):
-        if obj.is_expired():
-            return 0
-        
-        remaining = obj.expires_at - timezone.now()
-        return max(0, int(remaining.total_seconds()))
-    
-    def get_security_status(self, obj):
-        return {
-            'is_locked': obj.is_locked,
-            'attempts_used': obj.attempts,
-            'attempts_remaining': max(0, 5 - obj.attempts),
-            'integrity_verified': obj.verify_qr_integrity() if obj.qr_code else None
-        }
-
-"""class PaymentSerializer(serializers.ModelSerializer):
+    booking_id = serializers.IntegerField(source='booking.id', read_only=True)
     booking_details = serializers.SerializerMethodField()
-
+    
     class Meta:
         model = Payment
         fields = [
-            'id', 'transaction_id', 'amount', 'payment_method', 'status', 'qr_code', 'upi_id', 'created_at', 'completed_at', 'booking', 'booking_details'
-        ]
-        read_only_fields = ['id', 'transaction_id', 'created_at', 'completed_at', 'qr_code']
+            'id', 'booking', 'booking_id', 'booking_details', 
+            'stripe_payment_intent_id', 'amount', 'currency', 'status', 
+            'payment_method', 'created_at', 'completed_at', 'metadata']
+        read_only_fields = ['created_at', 'completed_at', 'stripe_payment_intent_id']
     
     def get_booking_details(self, obj):
-        from bookings.serializers import BookingSerializer
-        return BookingSerializer(obj.booking).data"""
+        return {
+            'id': obj.booking.id,
+            'club': obj.booking.club.name,
+            'sport': obj.booking.sport.name,
+            'date': obj.booking.date,
+            'time': f"{obj.booking.start_time} - {obj.booking.end_time}"
+        }
 
-class CreatePaymentSerializer(serializers.ModelSerializer):
+class PaymentIntentSerializer(serializers.Serializer):
+    booking_id = serializers.IntegerField()
+    
+    def validate_booking_id(self, value):
+        from bookings.models import Booking
+        try:
+            Booking.objects.get(id=value)
+        except Booking.DoesNotExist:
+            raise serializers.ValidationError("Booking not found")
+        return value
+
+class PaymentConfirmSerializer(serializers.Serializer):
+    booking_id = serializers.IntegerField()
+    payment_intent_id = serializers.CharField()
+    
+    def validate_booking_id(self, value):
+        from bookings.models import Booking
+        try:
+            Booking.objects.get(id=value)
+        except Booking.DoesNotExist:
+            raise serializers.ValidationError("Booking not found")
+        return value
+    
+    def validate_payment_intent_id(self, value):
+        if not value.startswith('pi_'):
+            raise serializers.ValidationError("Invalid payment intent ID format")
+        return value
+
+"""class CreatePaymentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Payment
@@ -75,29 +75,4 @@ class CreatePaymentSerializer(serializers.ModelSerializer):
         if payment_method == 'qr':
             payment.generate_qr_code()
         
-        return payment
-    
-"""class PaymentStatusSerializer(serializers.Serializer):
-    transaction_id = serializers.CharField()
-    status = serializers.ChoiceField(choices=Payment.STATUS_CHOICES)
-
-    def validate_transaction_id(self,value):
-        try:
-            Payment.objects.get(transaction_id=value)
-        except Payment.DoesNotExist:
-            raise serializers.ValidationError("Invalid transaction ID")
-        return value
-
-class RefundSerializer(serializers.Serializer):
-    transaction_id = serializers.CharField()
-    reason = serializers.CharField(required=False)
-
-    def validate_transaction_id(self, value):
-        try:
-            payment = Payment.objects.get(transaction_id=value)
-            if payment.status != 'completed':
-                raise serializers.ValidationError("Can you refund completed payments")
-        except Payment.DoesNotExist:
-            raise serializers.ValidationError("Invalid transaction ID")
-        return value"""
-    
+        return payment"""

@@ -1,47 +1,50 @@
 from rest_framework import serializers
-from .models import Booking
-from clubs.serializers import SportsClubSerializer, TimeSlotSerializer
+from .models import Booking, SlotLock, SlotWaitlist
+
+class SlotLockSerializer(serializers.ModelSerializer):
+    club_name = serializers.CharField(source='club.name', read_only=True)
+    sport_name = serializers.CharField(source='sport.name', read_only=True)
+    
+    class Meta:
+        model = SlotLock
+        fields = ['id', 'club', 'club_name', 'sport', 'sport_name', 'date', 'start_time', 'end_time', 'locked_at', 'expires_at', 'is_converted']
+        read_only_fields = ['locked_at', 'expires_at', 'is_converted']
+
 
 class BookingSerializer(serializers.ModelSerializer):
-    club = SportsClubSerializer(read_only=True)
-    time_slot = TimeSlotSerializer(read_only = True)
-    can_cancel = serializers.SerializerMethodField()
+    club_name = serializers.CharField(source='club.name', read_only=True)
+    sport_name = serializers.CharField(source='sport.name', read_only=True)
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    has_review = serializers.SerializerMethodField()
+    club_id = serializers.IntegerField(source='club.id', read_only=True)
 
     class Meta:
         model = Booking
-        fields = '__all__'
-        read_only_fields = ['id', 'user', 'booking_date', 'total_amount']
+        fields = ['id', 'user', 'user_name', 'user_email', 'club', 'club_id', 'club_name', 'sport', 'sport_name', 'date', 'start_time', 'end_time', 'amount', 'status', 'has_review', 'created_at', 'updated_at']
+        read_only_fields = ['user', 'status', 'created_at', 'updated_at']
     
-    def get_can_cancel(self, obj):
-        can_cancel, message = obj.can_cancel()
-        return {'allowed': can_cancel, 'reason': message}
+    def get_has_review(self, obj):
+        from clubs.models import Review
+        return Review.objects.filter(booking=obj).exists()
+    
+    
+class BookingCreateSerializer(serializers.Serializer):
+    club = serializers.IntegerField()
+    sport = serializers.IntegerField()
+    date = serializers.DateField()
+    start_time = serializers.TimeField()
+    end_time = serializers.TimeField()
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    lock_id = serializers.IntegerField()
+    
+class SlotWaitlistSerializer(serializers.ModelSerializer):
+    club_name = serializers.CharField(source='club.name', read_only=True)
+    sport_name = serializers.CharField(source='sport.name', read_only=True)
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
 
-class CreateBookingSerializer(serializers.ModelSerializer):
+    
     class Meta:
-        model = Booking
-        fields = ['club', 'time_slot', 'special_requests']
-
-    def validate(self,attrs):
-
-        
-        club = attrs['club']
-        time_slot = attrs['time_slot']
-
-        """print("Validating booking:", data)
-        return data"""
-
-        # Validate that time slot belongs to the club
-        if time_slot.club != club:
-            raise serializers.ValidationError("Time slot does not belong to the selected club")
-        
-        
-        
-        # validate that time time slot is available
-        if not time_slot.is_bookable:
-            raise serializers.ValidationError("Selected time slot is not available")
-        
-        return attrs
-
-       
-
-        
+        model = SlotWaitlist
+        fields = ['id', 'user', 'user_name', 'club', 'club_name', 'sport', 'sport_name', 'date', 'start_time', 'end_time', 'notified', 'created_at']
+        read_only_fields = ['user', 'notified', 'created_at']

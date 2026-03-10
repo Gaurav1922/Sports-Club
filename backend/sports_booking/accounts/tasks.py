@@ -1,5 +1,4 @@
 from celery import shared_task
-from twilio.rest import Client
 from django.conf import settings
 from django.core.mail import send_mail
 import logging
@@ -7,41 +6,46 @@ import logging
 logger = logging.getLogger(__name__)
 
 @shared_task
-def send_otp_sms(phone_number, otp):
+def send_otp_sms_task(mobile_number, otp):
     # Send OTP via SMS using Twilio
     try:
-        if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
-            logger.warning(f"Twilio not configured. OTP for {phone_number}: {otp}")
-            return f"OTP logged for {phone_number}: {otp}"
-        
+        from twilio.rest import Client
+
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
 
-        message = client.messages.create(
-            body=f'Your OTP for Sports Club booking is: {otp}. Valid for 10 minutes.',
-            from_=settings.TWILIO_PHONE_NUMBER,
-            to=phone_number
+        message_body = (
+            f"Your Sports Club OTP is {otp}\n"
+            f"Valid for 10 minutes.\n"
+            f"Do not share this code with anyone."
         )
 
-        logger.info(f"SMS sent successfully to {phone_number}: {message.sid}")
-        return f"SMS sent successfully: {message.sid}"
+        message = client.messages.create(
+            body=message_body,
+            from_=settings.TWILIO_PHONE_NUMBER,
+            to=f"+91{mobile_number}"
+        )
+
+        logger.info(f"OTP SMS sent to {mobile_number}: {message.sid}")
+        return f"OTP SMS sent: {message.sid}"
     
     except Exception as e:
-        logger.error(f"Failed to send SMS to {phone_number}: {str(e)}")
-        return f"Failed to send SMS: {str(e)}"
+        logger.error(f"Error sending OTP SMS to {mobile_number}: {str(e)}")
+        return f"Error sending OTP SMS: {str(e)}"
 
 @shared_task
-def send_welcome_email(user_id):
+def send_welcome_email_task(user_id):
     # Send welcome email to new user
     try:
         from django.contrib.auth import get_user_model
         User = get_user_model()
+
         user = User.objects.get(id=user_id)
 
         if user.email:
-            subject = 'Welcome to Sports Club Booking!'
+            subject = 'Welcome to Sports Club!'
             message = f'''
-            Hello {user.firsr_name or 'Sports Enthuiast'},
-            Welcome to our Sports Club Booking platform!
+            Hello {user.first_name or 'Sports Enthuiast'},
+            Welcome to our Sports Club! platform!
 
             You can now:
             - Browse nearby sports clubs
@@ -51,7 +55,7 @@ def send_welcome_email(user_id):
 
             Happy Playing😊!
 
-            Team Sports Club Booking
+            Team Sports Club Team
             '''
 
             send_mail(

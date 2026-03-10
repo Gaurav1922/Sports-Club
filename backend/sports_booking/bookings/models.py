@@ -1,11 +1,48 @@
 from django.db import models
 from django.contrib.auth import get_user_model
-from clubs.models import SportsClub, TimeSlot
+from django.utils import timezone
+from datetime import timedelta
+from django.conf import settings
 import uuid
 
 User = get_user_model()
 
 # Create your models here.
+
+class SlotLock(models.Model):
+    """Temporary lock on time slot during booking process"""
+    club = models.ForeignKey('clubs.Club', on_delete=models.CASCADE)
+    sport = models.ForeignKey('clubs.Sport', on_delete=models.CASCADE)
+    date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    locked_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_converted = models.BooleanField(default=False)   # Converted to booking
+
+    class Meta:
+        db_table = 'slot_locks'
+        unique_together = ['club', 'sport', 'date', 'start_time', 'end_time']
+        indexes = [
+            models.Index(fields=['expires_at']),
+            models.Index(fields=['is_converted']),
+            models.Index(fields=['user', 'is_converted']),
+        ]
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+    
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(
+                seconds=getattr(settings, 'SLOT_LOCK_DURATION', 600)
+            )
+        super().save(*args, **kwargs)
+    
+    def __str__(self):
+        return f"{self.club.name} - {self.date} {self.start_time}"
+
 
 class Booking(models.Model):
     STATUS_CHOICES = [
@@ -13,7 +50,6 @@ class Booking(models.Model):
         ('confirmed', 'Confirmed'),
         ('cancelled', 'Cancelled'),
         ('completed', 'Completed'),
-        ('no_show', 'No Show'),
     ]
 
     PAYMENT_STATUS_CHOICES = [
@@ -25,58 +61,55 @@ class Booking(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='bookings')
-    club = models.ForeignKey(SportsClub, on_delete=models.CASCADE, related_name='bookings')
-    time_slot = models.ForeignKey(TimeSlot, on_delete=models.CASCADE, related_name='bookings')
-    booking_date = models.DateTimeField(auto_now_add=True)
+    club = models.ForeignKey('clubs.Club', on_delete=models.CASCADE)
+    sport = models.ForeignKey('clubs.Sport', on_delete=models.CASCADE)
+    date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    special_requests = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    lock = models.ForeignKey(SlotLock, on_delete=models.SET_NULL, null=True, blank=True, related_name='booking')
 
-    # Cancellation details
+    """# Cancellation details
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.TextField(blank=True)
 
     # Admin Fields
-    admin_notes = models.TextField(blank=True)
+    admin_notes = models.TextField(blank=True)"""
 
     class Meta:
-        db_table = 'bookings_booking'
-        ordering = ['-booking_date']
+        db_table = 'bookings'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['date', 'club']),
+            models.Index(fields=['status', 'date']),
+        ]
 
     def __str__(self):
-        return f"{self.user.phone_number} - {self.club.name} - {self.time_slot.date}"
+        return f"{self.user.username} - {self.club.name} - {self.date}"
     
-    def can_cancel(self):
-        # Check if booking can be cancelled
-        from datetime import datetime, timedelta
+class SlotWaitlist(models.Model):
+    # track user who tried to book a locked slot
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='waitlisted_slots')
+    club = models.ForeignKey('clubs.Club', on_delete=models.CASCADE)
+    sport = models.ForeignKey('clubs.Sport', on_delete=models.CASCADE)
+    date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    notified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
 
-        if self.status not in ['pending', 'confirmed']:
-            return False, "Only pending or confirmed bookings can be cancelled"
-        
-        # Check if booking is more than 2 hours away
-        slot_datetime = datetime.combine(self.time_slot.date, self.time_slot.start_time)
-        current_time = datetime.now()
+    class Meta:
+        db_table = 'slot_waitlist'
+        ordering = ['created_at']   # First come, first notified
+        indexes = [
+            models.Index(fields=['club', 'sport', 'date', 'start_time']),
+            models.Index(fields=['notified', 'created_at']),
+        ]
 
-        if slot_datetime - current_time < timedelta(hours=2):
-            return False, "Cannot cancel booking less than 2 hours before slot time"
-        
-        return True, "OK"
+    def __str__(self):
+        return f"{self.user.username} waiting for {self.club.name} - {self.date} {self.start_time}"
     
-    def cancel_booking(self, reason=""):
-        from django.utils import timezone
-        # Cancel the booking and free up the slot
-        can_cancel, message = self.can_cancel()
-        if not can_cancel:
-            raise ValueError(message)
-        
-        self.status = 'cancelled'
-        self.cancelled_at = timezone.now()
-        self.cancellation_reason = reason
-        self.save()
-
-        # Free up the time slot
-        self.time_slot.current_bookings = max(0, self.time_slot.current_bookings - 1)
-        if self.time_slot.current_bookings < self.time_slot.max_capacity:
-            self.time_slot.is_available = True
-        self.time_slot.save()

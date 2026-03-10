@@ -1,0 +1,6 @@
+{
+    "css.lint.unknownAtRules": "ignore",
+    "editor.formatOnSave": true,
+    "files.autoSave": "afterDelay",
+    "postman.settings.dotenv-detection-notification-visibility": false
+}

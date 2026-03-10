@@ -9,132 +9,144 @@ const api = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mobile_number: mobile })
   }),
-  
+
   verifyOTP: (mobile, otp) => fetch(`${API_BASE_URL}/accounts/verify-otp/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mobile_number: mobile, otp })
   }),
-  
+
   register: (userData) => fetch(`${API_BASE_URL}/accounts/register/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(userData)
   }),
-  
+
   getClubs: (token) => fetch(`${API_BASE_URL}/clubs/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
-  
+
   getClubDetails: (token, clubId) => fetch(`${API_BASE_URL}/clubs/${clubId}/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
-  
+
   getAvailableSlots: (token, clubId, sportId, date) => fetch(
     `${API_BASE_URL}/bookings/available-slots/?club=${clubId}&sport=${sportId}&date=${date}`,
-    { headers: { 'Authorization': `Bearer ${token}` }}
+    { headers: { 'Authorization': `Bearer ${token}` } }
   ),
-  
+
   lockSlot: (token, slotData) => fetch(`${API_BASE_URL}/bookings/lock-slot/`, {
     method: 'POST',
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(slotData)
   }),
-  
+
   getBookings: (token) => fetch(`${API_BASE_URL}/bookings/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
-  
+
   createBooking: (token, bookingData) => fetch(`${API_BASE_URL}/bookings/`, {
     method: 'POST',
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(bookingData)
   }),
-  
+
   createPaymentIntent: (token, bookingId) => fetch(`${API_BASE_URL}/payments/create-intent/`, {
     method: 'POST',
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ booking_id: bookingId })
   }),
-  
+
   confirmPayment: (token, paymentData) => fetch(`${API_BASE_URL}/payments/confirm/`, {
     method: 'POST',
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(paymentData)
   }),
-  
+
   addReview: (token, reviewData) => fetch(`${API_BASE_URL}/clubs/reviews/`, {
     method: 'POST',
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(reviewData)
   }),
-  
+
   getReviews: (token, clubId) => fetch(`${API_BASE_URL}/clubs/${clubId}/reviews/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
-  
+
   getUserProfile: (token) => fetch(`${API_BASE_URL}/accounts/profile/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
-  
+
   // Admin APIs
   getDashboardStats: (token) => fetch(`${API_BASE_URL}/admin/dashboard-stats/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
-  
+
   getAllBookings: (token) => fetch(`${API_BASE_URL}/admin/bookings/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
-  
+
   updateBookingStatus: (token, bookingId, status) => fetch(
     `${API_BASE_URL}/admin/bookings/${bookingId}/status/`,
     {
       method: 'PATCH',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ status })
     }
   ),
-  
+
   createClub: (token, clubData) => fetch(`${API_BASE_URL}/admin/clubs/`, {
     method: 'POST',
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(clubData)
   }),
-  
+
   updateClub: (token, clubId, clubData) => fetch(`${API_BASE_URL}/admin/clubs/${clubId}/`, {
     method: 'PUT',
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(clubData)
   }),
-  
+
   deleteClub: (token, clubId) => fetch(`${API_BASE_URL}/admin/clubs/${clubId}/`, {
     method: 'DELETE',
     headers: { 'Authorization': `Bearer ${token}` }
-  })
+  }),
+
+  getWaitlist: (token) => fetch(`${API_BASE_URL}/bookings/waitlist/`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  }),
+
+  removeFromWaitlist: (token, waitlistId) => fetch(
+    `${API_BASE_URL}/bookings/waitlist/${waitlistId}/`,
+    {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }
+  )
 };
 
 // Stripe Mock Component (In production, use @stripe/react-stripe-js)
@@ -159,7 +171,7 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
       <div className="mb-4">
         <p className="text-2xl font-bold text-indigo-600 mb-4">₹{amount}</p>
       </div>
-      
+
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-2">Card Number</label>
@@ -172,7 +184,7 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
             maxLength="19"
           />
         </div>
-        
+
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-2">Expiry Date</label>
@@ -198,7 +210,7 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
           </div>
         </div>
       </div>
-      
+
       <div className="flex gap-3 mt-6">
         <button
           onClick={handleSubmit}
@@ -214,7 +226,7 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
           Cancel
         </button>
       </div>
-      
+
       <p className="text-xs text-gray-500 mt-4 text-center">
         🔒 Secured by Stripe - Your payment information is encrypted
       </p>
@@ -229,9 +241,8 @@ const StarRating = ({ rating, onRatingChange, readonly = false }) => {
       {[1, 2, 3, 4, 5].map((star) => (
         <Star
           key={star}
-          className={`w-6 h-6 ${
-            star <= rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'
-          } ${!readonly && 'cursor-pointer hover:text-yellow-400'}`}
+          className={`w-6 h-6 ${star <= rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'
+            } ${!readonly && 'cursor-pointer hover:text-yellow-400'}`}
           onClick={() => !readonly && onRatingChange && onRatingChange(star)}
         />
       ))}
@@ -246,12 +257,12 @@ function App() {
   const [token, setToken] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
+
   const [mobile, setMobile] = useState('');
   const [otp, setOTP] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
-  
+
   const [regData, setRegData] = useState({
     username: '',
     email: '',
@@ -259,7 +270,7 @@ function App() {
     last_name: '',
     mobile_number: ''
   });
-  
+
   const [clubs, setClubs] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [selectedClub, setSelectedClub] = useState(null);
@@ -269,13 +280,15 @@ function App() {
   const [lockedSlot, setLockedSlot] = useState(null);
   const [showPayment, setShowPayment] = useState(false);
   const [pendingBooking, setPendingBooking] = useState(null);
-  
+  const [waitlistedSlots, setWaitlistedSlots] = useState([]);
+  const [showWaitlistNotification, setShowWaitlistNotification] = useState(false);
+  const [waitlistMessage, setWaitlistMessage] = useState('');
   // Review state
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [clubReviews, setClubReviews] = useState([]);
-  
+
   // Admin state
   const [dashboardStats, setDashboardStats] = useState(null);
   const [allBookings, setAllBookings] = useState([]);
@@ -288,7 +301,7 @@ function App() {
     closing_time: '',
     description: ''
   });
-  
+
   // Booking form state
   const [bookingForm, setBookingForm] = useState({
     club: null,
@@ -296,20 +309,20 @@ function App() {
     date: new Date().toISOString().split('T')[0],
     slot: null
   });
-  
+
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     if (savedToken) {
       setToken(savedToken);
     }
   }, []);
-  
+
   useEffect(() => {
     if (token) {
       loadUserData();
     }
   }, [token]);
-  
+
   // Auto-clear messages after 5 seconds
   useEffect(() => {
     if (error || success) {
@@ -320,7 +333,7 @@ function App() {
       return () => clearTimeout(timer);
     }
   }, [error, success]);
-  
+
   const loadUserData = async () => {
     try {
       const response = await api.getUserProfile(token);
@@ -339,20 +352,20 @@ function App() {
       console.error('Failed to load user data:', err);
     }
   };
-  
+
   const handleSendOTP = async () => {
     setError('');
     setSuccess('');
-    
+
     if (!mobile || mobile.length !== 10) {
       setError('Please enter a valid 10-digit mobile number');
       return;
     }
-    
+
     try {
       const response = await api.sendOTP(mobile);
       const data = await response.json();
-      
+
       if (response.ok) {
         setOtpSent(true);
         setSuccess('OTP sent successfully! Check your SMS.');
@@ -363,20 +376,20 @@ function App() {
       setError('Network error. Please check your backend is running.');
     }
   };
-  
+
   const handleVerifyOTP = async () => {
     setError('');
     setSuccess('');
-    
+
     if (!otp || otp.length !== 6) {
       setError('Please enter a valid 6-digit OTP');
       return;
     }
-    
+
     try {
       const response = await api.verifyOTP(mobile, otp);
       const data = await response.json();
-      
+
       if (response.ok) {
         setIsVerified(true);
         setSuccess('OTP verified! Please complete registration.');
@@ -389,20 +402,20 @@ function App() {
       setError('Network error. Please try again.');
     }
   };
-  
+
   const handleRegister = async () => {
     setError('');
     setSuccess('');
-    
+
     if (!regData.username || !regData.email || !regData.first_name || !regData.last_name) {
       setError('Please fill all fields');
       return;
     }
-    
+
     try {
       const response = await api.register(regData);
       const data = await response.json();
-      
+
       if (response.ok) {
         setToken(data.access);
         localStorage.setItem('token', data.access);
@@ -415,7 +428,7 @@ function App() {
       setError('Network error. Please try again.');
     }
   };
-  
+
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -426,7 +439,7 @@ function App() {
     setMobile('');
     setOTP('');
   };
-  
+
   const loadClubs = async () => {
     try {
       const response = await api.getClubs(token);
@@ -438,7 +451,7 @@ function App() {
       setError('Failed to load clubs');
     }
   };
-  
+
   const loadBookings = async () => {
     try {
       const response = await api.getBookings(token);
@@ -450,7 +463,7 @@ function App() {
       setError('Failed to load bookings');
     }
   };
-  
+
   const loadAvailableSlots = async (clubId, sportId, date) => {
     try {
       const response = await api.getAvailableSlots(token, clubId, sportId, date);
@@ -462,15 +475,15 @@ function App() {
       setError('Failed to load available slots');
     }
   };
-  
+
   const handleSlotSelection = async (slot) => {
     if (slot.is_locked || slot.is_booked) {
       setError('This slot is not available');
       return;
     }
-    
+
     setSelectedSlot(slot);
-    
+
     // Lock the slot for 10 minutes
     try {
       const response = await api.lockSlot(token, {
@@ -480,12 +493,13 @@ function App() {
         start_time: slot.start_time,
         end_time: slot.end_time
       });
-      
+
+      const data = await response.json();
+
       if (response.ok) {
-        const data = await response.json();
         setLockedSlot(data);
         setSuccess('Slot reserved for 10 minutes. Please complete payment.');
-        
+
         // Start countdown timer
         setTimeout(() => {
           if (!showPayment) {
@@ -495,20 +509,58 @@ function App() {
             loadAvailableSlots(bookingForm.club, bookingForm.sport, bookingForm.date);
           }
         }, 600000); // 10 minutes
-        
+
+      } else if (response.status === 409) {
+        // User added to waitlist
+        if (data.waitlisted) {
+          setWaitlistMessage(data.error);
+          setShowWaitlistNotification(true);
+          setSuccess('');
+
+          // Auto-hide after 8 seconds
+          setTimeout(() => {
+            setShowWaitlistNotification(false);
+          }, 8000);
+        } else {
+          setError(data.error || 'Slot is no longer available');
+        }
+        loadAvailableSlots(bookingForm.club, bookingForm.sport, bookingForm.date);
       } else {
-        const data = await response.json();
-        setError(data.error || 'Slot is no longer available');
+        setError(data.error || 'Failed to lock slot');
         loadAvailableSlots(bookingForm.club, bookingForm.sport, bookingForm.date);
       }
     } catch (err) {
       setError('Failed to lock slot');
     }
   };
-  
+
+  const loadWaitlist = async () => {
+    try {
+      const response = await api.getWaitlist(token);
+      if (response.ok) {
+        const data = await response.json();
+        setWaitlistedSlots(data);
+      }
+    } catch (err) {
+      console.error('Failed to load waitlist');
+    }
+  };
+
+  const handleRemoveFromWaitlist = async (waitlistId) => {
+    try {
+      const response = await api.removeFromWaitlist(token, waitlistId);
+      if (response.ok) {
+        setSuccess('Removed from waitlist');
+        loadWaitlist();
+      }
+    } catch (err) {
+      setError('Failed to remove from waitlist');
+    }
+  };
+
   const handleCreateBooking = async () => {
     if (!selectedSlot) return;
-    
+
     try {
       const response = await api.createBooking(token, {
         club: bookingForm.club,
@@ -518,7 +570,7 @@ function App() {
         end_time: selectedSlot.end_time,
         lock_id: lockedSlot?.id
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         setPendingBooking(data);
@@ -530,14 +582,14 @@ function App() {
       setError('Failed to create booking');
     }
   };
-  
+
   const handlePaymentSuccess = async (paymentData) => {
     try {
       const response = await api.confirmPayment(token, {
         booking_id: pendingBooking.id,
         payment_intent_id: paymentData.paymentIntentId
       });
-      
+
       if (response.ok) {
         setSuccess('Booking confirmed! Confirmation sent via SMS and Email.');
         setShowPayment(false);
@@ -553,20 +605,20 @@ function App() {
       setError('Payment confirmation failed');
     }
   };
-  
+
   const handleAddReview = async () => {
     if (!reviewRating || !reviewText) {
       setError('Please provide rating and review');
       return;
     }
-    
+
     try {
       const response = await api.addReview(token, {
         club: selectedClub.id,
         rating: reviewRating,
         comment: reviewText
       });
-      
+
       if (response.ok) {
         setSuccess('Review submitted successfully!');
         setShowReviewForm(false);
@@ -580,7 +632,7 @@ function App() {
       setError('Failed to submit review');
     }
   };
-  
+
   const loadClubReviews = async (clubId) => {
     try {
       const response = await api.getReviews(token, clubId);
@@ -592,7 +644,7 @@ function App() {
       console.error('Failed to load reviews');
     }
   };
-  
+
   // Admin functions
   const loadDashboardStats = async () => {
     try {
@@ -605,7 +657,7 @@ function App() {
       console.error('Failed to load stats');
     }
   };
-  
+
   const loadAllBookings = async () => {
     try {
       const response = await api.getAllBookings(token);
@@ -617,7 +669,7 @@ function App() {
       setError('Failed to load bookings');
     }
   };
-  
+
   const handleUpdateBookingStatus = async (bookingId, status) => {
     try {
       const response = await api.updateBookingStatus(token, bookingId, status);
@@ -631,13 +683,13 @@ function App() {
       setError('Failed to update status');
     }
   };
-  
+
   const handleSaveClub = async () => {
     try {
       const response = editingClub
         ? await api.updateClub(token, editingClub.id, clubFormData)
         : await api.createClub(token, clubFormData);
-      
+
       if (response.ok) {
         setSuccess(editingClub ? 'Club updated!' : 'Club created!');
         setShowClubForm(false);
@@ -651,10 +703,10 @@ function App() {
       setError('Failed to save club');
     }
   };
-  
+
   const handleDeleteClub = async (clubId) => {
     if (!window.confirm('Are you sure you want to delete this club?')) return;
-    
+
     try {
       const response = await api.deleteClub(token, clubId);
       if (response.ok) {
@@ -667,11 +719,12 @@ function App() {
       setError('Failed to delete club');
     }
   };
-  
+
   useEffect(() => {
     if (token) {
       if (currentView === 'clubs') loadClubs();
       if (currentView === 'bookings') loadBookings();
+      if (currentView === 'waitlist') loadWaitlist();
       if (currentView === 'admin-dashboard' && user?.is_staff) {
         loadDashboardStats();
         loadClubs();
@@ -679,12 +732,12 @@ function App() {
       if (currentView === 'admin-bookings' && user?.is_staff) loadAllBookings();
     }
   }, [currentView, token]);
-  
+
   const filteredClubs = clubs.filter(club =>
     club.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     club.location?.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  
+
   if (!token) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -696,20 +749,20 @@ function App() {
             <h1 className="text-3xl font-bold text-gray-800">Sports Club</h1>
             <p className="text-gray-600 mt-2">Book your favorite sports facilities</p>
           </div>
-          
+
           {error && (
             <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg flex items-start gap-2">
               <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
               <span className="text-sm">{error}</span>
             </div>
           )}
-          
+
           {success && (
             <div className="mb-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded-lg text-sm">
               {success}
             </div>
           )}
-          
+
           {currentView === 'login' && !otpSent && (
             <div className="space-y-4">
               <div>
@@ -731,7 +784,7 @@ function App() {
               </button>
             </div>
           )}
-          
+
           {currentView === 'login' && otpSent && !isVerified && (
             <div className="space-y-4">
               <div>
@@ -759,7 +812,7 @@ function App() {
               </button>
             </div>
           )}
-          
+
           {currentView === 'register' && (
             <div className="space-y-4">
               <div>
@@ -812,7 +865,7 @@ function App() {
       </div>
     );
   }
-  
+
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-md">
@@ -822,31 +875,28 @@ function App() {
               <Calendar className="w-8 h-8 text-indigo-600" />
               <span className="text-xl font-bold text-gray-800">Sports Club</span>
             </div>
-            
+
             <div className="hidden md:flex items-center gap-6">
               {user?.is_staff ? (
                 <>
                   <button
                     onClick={() => setCurrentView('admin-dashboard')}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      currentView === 'admin-dashboard' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className={`px-4 py-2 rounded-lg transition ${currentView === 'admin-dashboard' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
                   >
                     Dashboard
                   </button>
                   <button
                     onClick={() => setCurrentView('admin-bookings')}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      currentView === 'admin-bookings' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className={`px-4 py-2 rounded-lg transition ${currentView === 'admin-bookings' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
                   >
                     All Bookings
                   </button>
                   <button
                     onClick={() => setCurrentView('admin-clubs')}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      currentView === 'admin-clubs' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className={`px-4 py-2 rounded-lg transition ${currentView === 'admin-clubs' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
                   >
                     Manage Clubs
                   </button>
@@ -855,25 +905,36 @@ function App() {
                 <>
                   <button
                     onClick={() => setCurrentView('clubs')}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      currentView === 'clubs' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className={`px-4 py-2 rounded-lg transition ${currentView === 'clubs' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
                   >
                     Clubs
                   </button>
                   <button
                     onClick={() => setCurrentView('bookings')}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      currentView === 'bookings' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className={`px-4 py-2 rounded-lg transition ${currentView === 'bookings' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
                   >
                     My Bookings
                   </button>
                   <button
+                    onClick={() => setCurrentView('waitlist')}
+                    className={`px-4 py-2 rounded-lg transition ${currentView === 'waitlist' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                  >
+                    My Waitlist
+                    {!user?.is_staff && waitlistedSlots.length > 0 && (
+                      <div className="relative">
+                        <span className="ml-2 px-2 py-0.5 bg-yellow-400 text-yellow-900 text-xs rounded-full">
+                          {waitlistedSlots.length}
+                        </span>
+                      </div>
+                    )}
+                  </button>
+                  <button
                     onClick={() => setCurrentView('profile')}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      currentView === 'profile' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
+                    className={`px-4 py-2 rounded-lg transition ${currentView === 'profile' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
                   >
                     Profile
                   </button>
@@ -887,7 +948,7 @@ function App() {
                 Logout
               </button>
             </div>
-            
+
             <button
               onClick={() => setMobileMenu(!mobileMenu)}
               className="md:hidden p-2"
@@ -895,7 +956,7 @@ function App() {
               {mobileMenu ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
           </div>
-          
+
           {mobileMenu && (
             <div className="md:hidden pb-4 space-y-2">
               {user?.is_staff ? (
@@ -934,6 +995,22 @@ function App() {
                     My Bookings
                   </button>
                   <button
+                    onClick={() => {
+                      setCurrentView('waitlist');
+                      setMobileMenu(false);
+                    }}
+                    className="block w-full text-left px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  >
+                    My Waitlist
+                    {!user?.is_staff && waitlistedSlots.length > 0 && (
+                      <div className="relative">
+                        <span className="ml-2 px-2 py-0.5 bg-yellow-400 text-yellow-900 text-xs rounded-full">
+                          {waitlistedSlots.length}
+                        </span>
+                      </div>
+                    )}
+                  </button>
+                  <button
                     onClick={() => { setCurrentView('profile'); setMobileMenu(false); }}
                     className="block w-full text-left px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
                   >
@@ -951,7 +1028,7 @@ function App() {
           )}
         </div>
       </nav>
-      
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {error && (
           <div className="mb-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg flex items-start gap-2">
@@ -959,13 +1036,13 @@ function App() {
             <span>{error}</span>
           </div>
         )}
-        
+
         {success && (
           <div className="mb-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg">
             {success}
           </div>
         )}
-        
+
         {/* Payment Modal */}
         {showPayment && pendingBooking && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -981,12 +1058,34 @@ function App() {
             </div>
           </div>
         )}
-        
+        {showWaitlistNotification && (
+          <div className="fixed top-20 right-4 z-50 max-w-md animate-slide-in">
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg shadow-lg">
+              <div className="flex items-start">
+                <AlertTriangle className="w-6 h-6 text-yellow-400 mr-3 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm font-semibold text-yellow-800 mb-1">
+                    Slot Currently Unavailable
+                  </h3>
+                  <p className="text-sm text-yellow-700 mb-2">
+                    {waitlistMessage}
+                  </p>
+                  <button
+                    onClick={() => setShowWaitlistNotification(false)}
+                    className="text-xs text-yellow-800 hover:text-yellow-900 underline"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Admin Dashboard */}
         {currentView === 'admin-dashboard' && user?.is_staff && (
           <div>
             <h2 className="text-3xl font-bold text-gray-800 mb-6">Admin Dashboard</h2>
-            
+
             {dashboardStats && (
               <div className="grid md:grid-cols-4 gap-6 mb-8">
                 <div className="bg-white rounded-lg shadow-md p-6">
@@ -998,7 +1097,7 @@ function App() {
                     <Calendar className="w-12 h-12 text-indigo-600" />
                   </div>
                 </div>
-                
+
                 <div className="bg-white rounded-lg shadow-md p-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1008,7 +1107,7 @@ function App() {
                     <DollarSign className="w-12 h-12 text-green-600" />
                   </div>
                 </div>
-                
+
                 <div className="bg-white rounded-lg shadow-md p-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1018,7 +1117,7 @@ function App() {
                     <Users className="w-12 h-12 text-blue-600" />
                   </div>
                 </div>
-                
+
                 <div className="bg-white rounded-lg shadow-md p-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1030,19 +1129,19 @@ function App() {
                 </div>
               </div>
             )}
-            
+
             <div className="bg-white rounded-lg shadow-md p-6">
               <h3 className="text-xl font-bold mb-4">Recent Activity</h3>
               <p className="text-gray-600">All bookings and activities are managed in real-time with instant notifications.</p>
             </div>
           </div>
         )}
-        
+
         {/* Admin - All Bookings */}
         {currentView === 'admin-bookings' && user?.is_staff && (
           <div>
             <h2 className="text-3xl font-bold text-gray-800 mb-6">All Bookings</h2>
-            
+
             {allBookings.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-lg shadow">
                 <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -1072,12 +1171,11 @@ function App() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm">{booking.start_time} - {booking.end_time}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">₹{booking.amount}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`px-2 py-1 text-xs rounded-full ${
-                              booking.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                            <span className={`px-2 py-1 text-xs rounded-full ${booking.status === 'confirmed' ? 'bg-green-100 text-green-800' :
                               booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                              booking.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
+                                booking.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                  'bg-gray-100 text-gray-800'
+                              }`}>
                               {booking.status}
                             </span>
                           </td>
@@ -1110,7 +1208,7 @@ function App() {
             )}
           </div>
         )}
-        
+
         {/* Admin - Manage Clubs */}
         {currentView === 'admin-clubs' && user?.is_staff && (
           <div>
@@ -1128,7 +1226,7 @@ function App() {
                 Add Club
               </button>
             </div>
-            
+
             {showClubForm && (
               <div className="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h3 className="text-xl font-bold mb-4">{editingClub ? 'Edit Club' : 'Add New Club'}</h3>
@@ -1200,7 +1298,7 @@ function App() {
                 </div>
               </div>
             )}
-            
+
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {clubs.map((club) => (
                 <div key={club.id} className="bg-white rounded-lg shadow-md p-6">
@@ -1245,7 +1343,7 @@ function App() {
             </div>
           </div>
         )}
-        
+
         {/* User - Clubs View */}
         {currentView === 'clubs' && !user?.is_staff && (
           <div>
@@ -1262,7 +1360,7 @@ function App() {
                 />
               </div>
             </div>
-            
+
             {selectedClub ? (
               <div>
                 <button
@@ -1274,7 +1372,7 @@ function App() {
                 >
                   ← Back to Clubs
                 </button>
-                
+
                 <div className="bg-white rounded-lg shadow-md p-6 mb-6">
                   <h3 className="text-2xl font-bold text-gray-800 mb-4">{selectedClub.name}</h3>
                   <div className="space-y-3 text-gray-600 mb-6">
@@ -1293,14 +1391,14 @@ function App() {
                       </div>
                     )}
                   </div>
-                  
+
                   <button
                     onClick={() => setCurrentView('book-slot')}
                     className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 mb-4"
                   >
                     Book Now
                   </button>
-                  
+
                   <button
                     onClick={() => {
                       setShowReviewForm(!showReviewForm);
@@ -1311,7 +1409,7 @@ function App() {
                     {showReviewForm ? 'Hide Reviews' : 'View Reviews & Rate'}
                   </button>
                 </div>
-                
+
                 {showReviewForm && (
                   <div className="bg-white rounded-lg shadow-md p-6 mb-6">
                     <h4 className="text-xl font-bold mb-4">Write a Review</h4>
@@ -1335,7 +1433,7 @@ function App() {
                     >
                       Submit Review
                     </button>
-                    
+
                     {clubReviews.length > 0 && (
                       <div className="mt-6">
                         <h4 className="text-lg font-bold mb-4">Customer Reviews</h4>
@@ -1399,7 +1497,7 @@ function App() {
             )}
           </div>
         )}
-        
+
         {/* Book Slot View */}
         {currentView === 'book-slot' && selectedClub && (
           <div>
@@ -1409,10 +1507,10 @@ function App() {
             >
               ← Back to Club Details
             </button>
-            
+
             <div className="bg-white rounded-lg shadow-md p-6">
               <h3 className="text-2xl font-bold mb-6">Book Your Slot</h3>
-              
+
               {lockedSlot && (
                 <div className="mb-6 p-4 bg-yellow-50 border border-yellow-400 rounded-lg flex items-start gap-2">
                   <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5" />
@@ -1422,7 +1520,7 @@ function App() {
                   </div>
                 </div>
               )}
-              
+
               <div className="space-y-4 mb-6">
                 <div>
                   <label className="block text-sm font-medium mb-2">Select Sport</label>
@@ -1441,7 +1539,7 @@ function App() {
                     ))}
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium mb-2">Select Date</label>
                   <input
@@ -1458,7 +1556,7 @@ function App() {
                   />
                 </div>
               </div>
-              
+
               {availableSlots.length > 0 && (
                 <div>
                   <h4 className="font-semibold mb-3">Available Time Slots</h4>
@@ -1468,20 +1566,23 @@ function App() {
                         key={index}
                         onClick={() => handleSlotSelection(slot)}
                         disabled={slot.is_locked || slot.is_booked}
-                        className={`p-3 rounded-lg border-2 transition ${
-                          slot.is_booked ? 'border-red-300 bg-red-50 text-red-400 cursor-not-allowed' :
+                        className={`p-3 rounded-lg border-2 transition ${slot.is_booked ? 'border-red-300 bg-red-50 text-red-400 cursor-not-allowed' :
                           slot.is_locked ? 'border-yellow-300 bg-yellow-50 text-yellow-600 cursor-not-allowed' :
-                          selectedSlot?.start_time === slot.start_time ? 'border-indigo-600 bg-indigo-50 text-indigo-700' :
-                          'border-gray-300 hover:border-indigo-400 hover:bg-indigo-50'
-                        }`}
+                            selectedSlot?.start_time === slot.start_time ? 'border-indigo-600 bg-indigo-50 text-indigo-700' :
+                              'border-gray-300 hover:border-indigo-400 hover:bg-indigo-50'
+                          }`}
                       >
                         <div className="text-sm font-semibold">{slot.start_time}</div>
                         <div className="text-xs">{slot.end_time}</div>
-                        {slot.is_locked && <Lock className="w-3 h-3 mx-auto mt-1" />}
+                        {slot.is_locked && (
+                          <div className="mt-1 flex items-center justify-center gap-1">
+                            <Lock className="w-3 h-3" />
+                            <span className="text-xs">Click to join waitlist</span>
+                          </div>
+                        )}
                       </button>
                     ))}
                   </div>
-                  
                   {selectedSlot && lockedSlot && (
                     <div className="mt-6">
                       <div className="bg-gray-50 p-4 rounded-lg mb-4">
@@ -1502,7 +1603,7 @@ function App() {
             </div>
           </div>
         )}
-        
+
         {/* User Bookings View */}
         {currentView === 'bookings' && !user?.is_staff && (
           <div>
@@ -1527,12 +1628,11 @@ function App() {
                         <h3 className="text-xl font-bold text-gray-800">{booking.club_name}</h3>
                         <p className="text-gray-600">{booking.sport_name}</p>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                        booking.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${booking.status === 'confirmed' ? 'bg-green-100 text-green-700' :
                         booking.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                        booking.status === 'completed' ? 'bg-blue-100 text-blue-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>
+                          booking.status === 'completed' ? 'bg-blue-100 text-blue-700' :
+                            'bg-red-100 text-red-700'
+                        }`}>
                         {booking.status}
                       </span>
                     </div>
@@ -1573,7 +1673,114 @@ function App() {
             )}
           </div>
         )}
-        
+
+        {/* Waitlist View */}
+        {currentView === 'waitlist' && !user?.is_staff && (
+          <div>
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">My Waitlist</h2>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold text-blue-900 mb-1">About Waitlist</h3>
+                  <p className="text-sm text-blue-800">
+                    You'll be automatically notified via SMS and Email when any of these slots become available.
+                    The slot becomes available when the previous user's 10-minute lock expires without payment.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {waitlistedSlots.length === 0 ? (
+              <div className="text-center py-12 bg-white rounded-lg shadow">
+                <Clock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600 mb-4">No slots in waitlist</p>
+                <button
+                  onClick={() => setCurrentView('clubs')}
+                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                >
+                  Browse Clubs
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {waitlistedSlots.map((waitlist) => (
+                  <div key={waitlist.id} className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">{waitlist.club_name}</h3>
+                        <p className="text-gray-600">{waitlist.sport_name}</p>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${waitlist.notified
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-yellow-100 text-yellow-700'
+                        }`}>
+                        {waitlist.notified ? 'Notified' : 'Waiting'}
+                      </span>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-600 mb-4">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        <span>{waitlist.date}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4" />
+                        <span>{waitlist.start_time} - {waitlist.end_time}</span>
+                      </div>
+                    </div>
+
+                    {waitlist.notified && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
+                        <p className="text-sm text-green-800 flex items-center gap-2">
+                          <CheckCircle className="w-4 h-4" />
+                          This slot is now available! Book it before someone else does.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-3">
+                      {waitlist.notified ? (
+                        <button
+                          onClick={() => {
+                            // Navigate to booking for this slot
+                            setSelectedClub({ id: waitlist.club });
+                            setBookingForm({
+                              club: waitlist.club,
+                              sport: waitlist.sport,
+                              date: waitlist.date,
+                              slot: null
+                            });
+                            setCurrentView('book-slot');
+                          }}
+                          className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition"
+                        >
+                          Book Now
+                        </button>
+                      ) : (
+                        <div className="flex-1 bg-gray-100 text-gray-500 py-2 rounded-lg text-center">
+                          Waiting for slot to be available...
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => handleRemoveFromWaitlist(waitlist.id)}
+                        className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition"
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-gray-500 mt-3">
+                      Added to waitlist: {new Date(waitlist.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {/* Profile View */}
         {currentView === 'profile' && user && !user.is_staff && (
           <div>
