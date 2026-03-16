@@ -1,3 +1,6 @@
+from django.conf import settings
+from clubs.models import Club
+from clubs.serializers import ClubSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -69,11 +72,14 @@ class SendOTPView(APIView):
 
         # Log OTP for development (remove in production)
         logger.info(f"OTP for {mobile_number}: {otp_code}")
+        print(f"\n{'='*40}\nDEV OTP for {mobile_number}: {otp_code}\n{'='*40}\n")
+
         
         return Response({
             'message': 'OTP sent successfully',
             'mobile_number': mobile_number,
-            'expires_in' : 600  # 10 mintutes in seconds
+            'expires_in' : 600,  # 10 mintutes in seconds
+            'otp' : otp_code if settings.DEBUG else None # shows in browser response
         }, status=status.HTTP_200_OK)
         
 
@@ -238,66 +244,217 @@ class ChangePasswordView(APIView):
     
 
 # Admin Views
+
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def dashboard_stats(request):
-    """Get dashboard statistics for admin"""
+    from bookings.models import Booking
+    from payments.models import Payment
+    from clubs.models import Club, Sport
+    from django.contrib.auth import get_user_model
+    from django.db.models import Sum
+    from django.utils import timezone
+    from datetime import timedelta
+
+    User = get_user_model()
     today = timezone.now().date()
-    
-    total_revenue = Booking.objects.filter(
-        status='confirmed'
-    ).aggregate(Sum('amount'))['amount__sum'] or 0
-    
-    revenue_this_month = Booking.objects.filter(
-        status='confirmed',
-        created_at__month=today.month,
-        created_at__year=today.year
-    ).aggregate(Sum('amount'))['amount__sum'] or 0
-    
-    stats = {
-        'total_bookings': Booking.objects.count(),
-        'total_revenue': float(total_revenue),
-        'active_users': User.objects.filter(
-            is_active=True,
-            bookings__isnull=False
-        ).distinct().count(),
-        'today_bookings': Booking.objects.filter(date=today).count(),
-        'pending_bookings': Booking.objects.filter(status='pending').count(),
-        'confirmed_bookings': Booking.objects.filter(status='confirmed').count(),
-        'completed_bookings': Booking.objects.filter(status='completed').count(),
-        'cancelled_bookings': Booking.objects.filter(status='cancelled').count(),
-        'revenue_this_month': float(revenue_this_month),
-        'total_users': User.objects.count(),
-        'new_users_this_month': User.objects.filter(
-            date_joined__month=today.month,
-            date_joined__year=today.year
-        ).count(),
-        'verified_users': User.objects.filter(is_mobile_verified=True).count()
-    }
-    
-    return Response(stats)
+
+    total_bookings = Booking.objects.count()
+    confirmed_bookings = Booking.objects.filter(status='confirmed').count()
+    pending_bookings = Booking.objects.filter(status='pending').count()
+    today_bookings = Booking.objects.filter(created_at__date=today).count()
+    active_users = User.objects.filter(is_active=True, is_staff=False).count()
+
+    total_earned = Payment.objects.filter(status='completed').aggregate(total=Sum('amount'))['total'] or 0
+    total_refunded = Payment.objects.filter(status='refunded').aggregate(total=Sum('amount'))['total'] or 0
+    net_revenue = float(total_earned) - float(total_refunded)
+
+    weekly_bookings = []
+    for i in range(6, -1, -1):
+        day = today - timedelta(days=i)
+        count = Booking.objects.filter(created_at__date=day, status__in=['confirmed', 'pending', 'refunded']).count()
+        weekly_bookings.append({'date': str(day), 'label': day.strftime('%a'), 'count': count})
+
+    recent_activities = []
+
+    # Recent bookings
+    for b in Booking.objects.select_related('user', 'club', 'sport').order_by('-updated_at')[:15]:
+        if b.status == 'confirmed':
+            msg = f"{b.user.get_full_name() or b.user.username} booked {b.sport.name} at {b.club.name}"
+            atype = 'confirmed'
+        elif b.status == 'refunded':
+            msg = f"Refund for {b.user.get_full_name() or b.user.username} — {b.club.name}"
+            atype = 'refunded'
+        elif b.status == 'cancelled':
+            msg = f"{b.user.get_full_name() or b.user.username} cancelled at {b.club.name}"
+            atype = 'cancelled'
+        elif b.status == 'pending':
+            msg = f"{b.user.get_full_name() or b.user.username} initiated booking at {b.club.name}"
+            atype = 'pending'
+        else:
+            continue
+        delta = timezone.now() - b.updated_at
+        ts = b.updated_at.strftime('%d %b, %I:%M %p')
+        if delta.total_seconds() < 60: ts = "Just now"
+        elif delta.total_seconds() < 3600: ts = f"{int(delta.total_seconds()//60)}m ago"
+        elif delta.days == 0: ts = f"{int(delta.total_seconds()//3600)}h ago"
+        recent_activities.append({'type': atype, 'message': msg, 'time': ts,
+            'amount': float(b.amount) if b.status in ['confirmed', 'refunded'] else None,
+            'sort_key': b.updated_at.timestamp()})
+
+    # Recent clubs added
+    for club in Club.objects.order_by('-created_at')[:5]:
+        delta = timezone.now() - club.created_at
+        ts = club.created_at.strftime('%d %b, %I:%M %p')
+        if delta.total_seconds() < 60: ts = "Just now"
+        elif delta.total_seconds() < 3600: ts = f"{int(delta.total_seconds()//60)}m ago"
+        elif delta.days == 0: ts = f"{int(delta.total_seconds()//3600)}h ago"
+        recent_activities.append({'type': 'club_added',
+            'message': f"New club added: {club.name} — {club.location}",
+            'time': ts, 'amount': None, 'sort_key': club.created_at.timestamp()})
+
+    # Recent sports added
+    for sport in Sport.objects.select_related('club').order_by('-id')[:5]:
+        recent_activities.append({'type': 'sport_added',
+            'message': f"Sport added: {sport.name} at {sport.club.name} (₹{sport.price_per_hour}/hr)",
+            'time': 'Recently', 'amount': None, 'sort_key': 0})
+
+    recent_activities.sort(key=lambda x: x.get('sort_key', 0), reverse=True)
+    for a in recent_activities:
+        a.pop('sort_key', None)
+
+    return Response({
+        'total_bookings': total_bookings, 'confirmed_bookings': confirmed_bookings,
+        'pending_bookings': pending_bookings, 'today_bookings': today_bookings,
+        'active_users': active_users, 'total_revenue': float(total_earned),
+        'total_refunded': float(total_refunded), 'net_revenue': round(net_revenue, 2),
+        'weekly_bookings': weekly_bookings, 'recent_activities': recent_activities[:20],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def monthly_report(request):
+    from bookings.models import Booking
+    from payments.models import Payment
+    from clubs.models import Club
+    from django.db.models import Sum
+    from django.utils import timezone
+    from datetime import timedelta, date
+    from calendar import monthrange
+
+    today = timezone.now().date()
+    month = int(request.query_params.get('month', today.month))
+    year = int(request.query_params.get('year', today.year))
+    _, last_day = monthrange(year, month)
+    start_date = date(year, month, 1)
+    end_date = date(year, month, last_day)
+
+    month_bookings = Booking.objects.filter(
+        date__gte=start_date, date__lte=end_date,
+        status__in=['confirmed', 'refunded', 'cancelled']
+    ).select_related('user', 'club', 'sport')
+
+    club_breakdown = []
+    for club in Club.objects.prefetch_related('sports'):
+        cb = month_bookings.filter(club=club)
+        if not cb.exists():
+            continue
+        revenue = Payment.objects.filter(booking__club=club, booking__date__gte=start_date,
+            booking__date__lte=end_date, status='completed').aggregate(total=Sum('amount'))['total'] or 0
+        refunds = Payment.objects.filter(booking__club=club, booking__date__gte=start_date,
+            booking__date__lte=end_date, status='refunded').aggregate(total=Sum('amount'))['total'] or 0
+        sports_data = []
+        for s in club.sports.filter(is_active=True):
+            sb = cb.filter(sport=s)
+            if sb.exists():
+                sr = Payment.objects.filter(booking__club=club, booking__sport=s,
+                    booking__date__gte=start_date, booking__date__lte=end_date,
+                    status='completed').aggregate(total=Sum('amount'))['total'] or 0
+                sports_data.append({'name': s.name, 'bookings': sb.count(), 'revenue': float(sr)})
+        club_breakdown.append({
+            'club_name': club.name, 'location': club.location,
+            'total_bookings': cb.count(), 'confirmed': cb.filter(status='confirmed').count(),
+            'refunded': cb.filter(status='refunded').count(), 'cancelled': cb.filter(status='cancelled').count(),
+            'gross_revenue': float(revenue), 'refunds': float(refunds),
+            'net_revenue': float(revenue) - float(refunds), 'sports': sports_data
+        })
+
+    daily_data = []
+    current = start_date
+    while current <= end_date:
+        db = month_bookings.filter(date=current)
+        dr = Payment.objects.filter(booking__date=current, status='completed').aggregate(
+            total=Sum('amount'))['total'] or 0
+        daily_data.append({'date': str(current), 'day': current.strftime('%a %d'),
+            'bookings': db.count(), 'confirmed': db.filter(status='confirmed').count(), 'revenue': float(dr)})
+        current += timedelta(days=1)
+
+    total_rev = Payment.objects.filter(booking__date__gte=start_date, booking__date__lte=end_date,
+        status='completed').aggregate(total=Sum('amount'))['total'] or 0
+    total_ref = Payment.objects.filter(booking__date__gte=start_date, booking__date__lte=end_date,
+        status='refunded').aggregate(total=Sum('amount'))['total'] or 0
+
+    return Response({
+        'month': month, 'year': year, 'month_name': start_date.strftime('%B %Y'),
+        'total_bookings': month_bookings.count(),
+        'confirmed_bookings': month_bookings.filter(status='confirmed').count(),
+        'cancelled_bookings': month_bookings.filter(status='cancelled').count(),
+        'refunded_bookings': month_bookings.filter(status='refunded').count(),
+        'gross_revenue': float(total_rev), 'total_refunds': float(total_ref),
+        'net_revenue': float(total_rev) - float(total_ref),
+        'club_breakdown': club_breakdown, 'daily_data': daily_data,
+    })
+
+# ─────────────────────────────────────────────────────────────────
+# REPLACE your existing all_bookings function in accounts/views.py
+# ─────────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def all_bookings(request):
-    """Get all bookings for admin"""
-    bookings = Booking.objects.select_related('user', 'club', 'sport').all()
-    
-    data = [{
-        'id': b.id,
-        'user_name': b.user.get_full_name() or b.user.username,
-        'user_email': b.user.email,
-        'user_mobile': b.user.mobile_number,
-        'club_name': b.club.name,
-        'sport_name': b.sport.name,
-        'date': b.date,
-        'start_time': b.start_time,
-        'end_time': b.end_time,
-        'amount': float(b.amount),
-        'status': b.status,
-        'created_at': b.created_at
-    } for b in bookings]
-    
+    """Admin: list all bookings with payment method included"""
+    from bookings.models import Booking
+    from payments.models import Payment
+
+    bookings = Booking.objects.select_related(
+        'user', 'club', 'sport', 'payment'
+    ).order_by('-created_at')
+
+    # Build payment_method lookup map for efficiency
+    payment_map = {
+        p.booking_id: p.payment_method
+        for p in Payment.objects.all().values_list('booking_id', 'payment_method', named=True)
+    }
+
+    data = []
+    for b in bookings:
+        # Get payment method: try related object first, then map, then default
+        method = ''
+        try:
+            method = (b.payment.payment_method or '').strip()
+        except Exception:
+            pass
+        if not method:
+            method = (payment_map.get(b.id) or '').strip()
+        if not method and b.status in ('confirmed', 'refunded'):
+            method = 'card'  # default for old bookings before payment mode was tracked
+
+        data.append({
+            'id': str(b.id),
+            'user_name': b.user.get_full_name() or b.user.username,
+            'club_name': b.club.name,
+            'club_location': b.club.location,
+            'sport_name': b.sport.name,
+            'date': str(b.date),
+            'start_time': str(b.start_time),
+            'end_time': str(b.end_time),
+            'amount': float(b.amount),
+            'status': b.status,
+            'payment_method': method or None,
+            'created_at': b.created_at.isoformat(),
+        })
+
     return Response(data)
 
 @api_view(['PATCH'])
@@ -361,3 +518,51 @@ def all_users(request):
     } for u in users]
     
     return Response(data)
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdminUser])
+def admin_clubs(request):
+    """Admin: list all clubs or create a new one"""
+    from clubs.models import Club
+    from clubs.serializers import ClubSerializer
+ 
+    if request.method == 'GET':
+        clubs = Club.objects.all()
+        serializer = ClubSerializer(clubs, many=True)
+        return Response(serializer.data)
+ 
+    elif request.method == 'POST':
+        serializer = ClubSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+ 
+ 
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
+@permission_classes([IsAdminUser])
+def admin_club_detail(request, club_id):
+    """Admin: retrieve, update, or delete a specific club"""
+    from clubs.models import Club
+    from clubs.serializers import ClubSerializer
+ 
+    try:
+        club = Club.objects.get(id=club_id)
+    except Club.DoesNotExist:
+        return Response({'error': 'Club not found'}, status=status.HTTP_404_NOT_FOUND)
+ 
+    if request.method == 'GET':
+        serializer = ClubSerializer(club)
+        return Response(serializer.data)
+ 
+    elif request.method in ['PUT', 'PATCH']:
+        partial = request.method == 'PATCH'
+        serializer = ClubSerializer(club, data=request.data, partial=partial)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+ 
+    elif request.method == 'DELETE':
+        club.delete()
+        return Response({'message': 'Club deleted successfully'}, status=status.HTTP_204_NO_CONTENT)

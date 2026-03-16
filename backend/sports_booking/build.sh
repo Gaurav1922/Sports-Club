@@ -16,7 +16,7 @@ python manage.py collectstatic --no-input
 # Apply database migrations
 python manage.py migrate
 
-# Create sample data (optional - remove in production)
+"""# Create sample data (optional - remove in production)
 python manage.py create_sample_data
 
 # Create superuser if it doesn't exist
@@ -35,3 +35,4 @@ else:
 EOF
 
 echo "Build completed successfully!"
+"""

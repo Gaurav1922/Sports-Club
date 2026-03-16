@@ -2,198 +2,125 @@ from celery import shared_task
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
+from datetime import timedelta
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 @shared_task
 def send_booking_confirmation_email(booking_id):
-    """Send booking confirmation email"""
+    """Send booking confirmation email to user"""
     try:
-        from .models import Booking
+        from bookings.models import Booking
         booking = Booking.objects.select_related('user', 'club', 'sport').get(id=booking_id)
-        
+        user = booking.user
+
+        if not user.email:
+            logger.info(f"No email for user {user.username}, skipping confirmation email")
+            return "No email address"
+
         subject = f'Booking Confirmed - {booking.club.name}'
         message = f"""
-        Dear {booking.user.first_name},
-        
-        Your booking has been confirmed!
-        
-        Booking Details:
-        ----------------
-        Booking ID: {booking.id}
-        Club: {booking.club.name}
-        Location: {booking.club.location}
-        Sport: {booking.sport.name}
-        Date: {booking.date.strftime('%d %B, %Y')}
-        Time: {booking.start_time.strftime('%I:%M %p')} - {booking.end_time.strftime('%I:%M %p')}
-        Amount: ₹{booking.amount}
-        
-        Please arrive 10 minutes before your booking time.
-        
-        If you have any questions, please contact us.
-        
-        Best regards,
-        Sports Club Team
-        """
-        
-        send_mail(
-            subject,
-            message,
-            settings.DEFAULT_FROM_EMAIL,
-            [booking.user.email],
-            fail_silently=False,
-        )
-        logger.info(f"Confirmation email sent to {booking.user.email} for booking {booking_id}")
-        return f"Email sent to {booking.user.email}"
-    except Exception as e:
-        logger.error(f"Error sending confirmation email for booking {booking_id}: {str(e)}")
-        return f"Error sending email: {str(e)}"
+Dear {user.first_name or user.username},
 
-@shared_task
-def send_booking_confirmation_sms(booking_id):
-    """Send booking confirmation SMS via Twilio"""
-    try:
-        from twilio.rest import Client
-        from .models import Booking
-        
-        booking = Booking.objects.select_related('user', 'club', 'sport').get(id=booking_id)
-        
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        
-        message_body =(
-            f"Booking Confirmed!\n"
-            f"{booking.club.name}\n"
-            f"Date: {booking.date.strftime('%d-%m-%Y')}\n"
-            f"Time: {booking.start_time.strftime('%I:%M %p')}\n"
-            f"Booking ID: {booking.id}"
-        )
-        
-        message = client.messages.create(
-            body=message_body,
-            from_=settings.TWILIO_PHONE_NUMBER,
-            to=f"+91{booking.user.mobile_number}"
-        )
-        
-        logger.info(f"Confirmation SMS sent to {booking.user.mobile_number} for booking {booking_id}")
-        return f"SMS sent: {message.sid}"
-    except Exception as e:
-        logger.error(f"Error sending confirmation SMS for booking {booking_id}: {str(e)}")
-        return f"Error sending SMS: {str(e)}"
+Your booking has been confirmed!
 
-@shared_task
-def send_otp_sms_task(mobile_number, otp):
-    """Send OTP via SMS"""
-    try:
-        from twilio.rest import Client
-        
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        
-        message_body = f"Your Sports Club OTP is: {otp}\nValid for 10 minutes.\nDo not share this code."
+Booking Details:
+- Club: {booking.club.name}
+- Sport: {booking.sport.name}
+- Date: {booking.date}
+- Time: {booking.start_time} - {booking.end_time}
+- Amount: ₹{booking.amount}
 
-        message = client.messages.create(
-            body=message_body,
-            from_=settings.TWILIO_PHONE_NUMBER,
-            to=f"+91{mobile_number}"
-        )
-        
-        logger.info(f"OTP SMS sent to {mobile_number}")
-        return f"OTP SMS sent: {message.sid}"
-    except Exception as e:
-        logger.error(f"Error sending OTP SMS to {mobile_number}: {str(e)}")
-        return f"Error sending OTP SMS: {str(e)}"
-    
-@shared_task
-def cleanup_expired_locks():
-    """Periodic task to clean up expired slot locks and notify waitlisted users"""
-    try:
-        from .models import SlotLock
-        
-        expired_locks = SlotLock.objects.filter(
-            expires_at__lt=timezone.now(),
-            is_converted=False
-        ).select_related('club', 'sport')
-        
-        # Store lock details before deletion for notifications
-        locks_to_notify = []
-        for lock in expired_locks:
-            locks_to_notify.append({
-                'club_id': lock.club.id,
-                'sport_id': lock.sport.id,
-                'date': lock.date.strftime('%Y-%m-%d'),
-                'start_time': str(lock.start_time),
-                'end_time': str(lock.end_time),
-            })
-        
-        count = expired_locks.count()
-        expired_locks.delete()
-        
-        # Notify waitlisted users for each expired lock
-        for lock_info in locks_to_notify:
-            notify_waitlisted_users.delay(
-                lock_info['club_id'],
-                lock_info['sport_id'],
-                lock_info['date'],
-                lock_info['start_time'],
-                lock_info['end_time']
-            )
-        
-        logger.info(f"Deleted {count} expired locks and queued notifications")
-        return f"Deleted {count} expired locks, notified waitlisted users"
-    except Exception as e:
-        logger.error(f"Error cleaning up expired locks: {str(e)}")
-        return f"Error: {str(e)}"
+Please arrive 15 minutes before your slot time.
 
-
-@shared_task
-def send_booking_status_update(booking_id, status):
-    """Notify user about booking status change"""
-    try:
-        from .models import Booking
-        from twilio.rest import Client
-        
-        booking = Booking.objects.select_related('user', 'club').get(id=booking_id)
-        
-       # Send Email
-        subject = f'Booking {status.title()} - {booking.club.name}'
-        message = f"""
-Dear {booking.user.first_name},
-
-Your booking status has been updated.
-
-Booking ID: {booking.id}
-Club: {booking.club.name}
-Status: {status.upper()}
-
-If you have any questions, please contact us.
+Thank you for booking with Sports Club!
 
 Best regards,
 Sports Club Team
         """
-        
+
         send_mail(
             subject,
             message,
-            settings.DEFAULT_FROM_EMAIL,
-            [booking.user.email],
-            fail_silently=False,
+            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@sportsclub.com'),
+            [user.email],
+            fail_silently=True,
         )
-        
-        # Send SMS
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        sms_body = f"Booking #{booking.id} status updated to: {status.upper()}"
+        logger.info(f"Confirmation email sent to {user.email} for booking {booking_id}")
+        return f"Email sent to {user.email}"
 
-        client.messages.create(
-            body=sms_body,
-            from_=settings.TWILIO_PHONE_NUMBER,
-            to=f"+91{booking.user.mobile_number}"
-        )
-        
-        logger.info(f"Status update notifications sent for booking {booking_id}")
-        return f"Status update notifications sent for booking {booking_id}"
     except Exception as e:
-        logger.error(f"Error sending status update for booking {booking_id}: {str(e)}")
-        return f"Error: {str(e)}"
+        logger.error(f"Failed to send confirmation email for booking {booking_id}: {e}")
+        return f"Failed: {str(e)}"
+
+
+@shared_task
+def send_booking_confirmation_sms(booking_id):
+    """Send booking confirmation SMS to user"""
+    try:
+        from bookings.models import Booking
+        booking = Booking.objects.select_related('user', 'club', 'sport').get(id=booking_id)
+        user = booking.user
+
+        if not user.mobile_number:
+            logger.info(f"No mobile for user {user.username}, skipping SMS")
+            return "No mobile number"
+
+        # Only send if Twilio is configured
+        twilio_sid = getattr(settings, 'TWILIO_ACCOUNT_SID', None)
+        twilio_token = getattr(settings, 'TWILIO_AUTH_TOKEN', None)
+        twilio_from = getattr(settings, 'TWILIO_PHONE_NUMBER', None)
+
+        if not all([twilio_sid, twilio_token, twilio_from]) or twilio_sid == 'None':
+            logger.info(f"Twilio not configured, skipping SMS for booking {booking_id}")
+            return "Twilio not configured"
+
+        from twilio.rest import Client
+        client = Client(twilio_sid, twilio_token)
+        message = client.messages.create(
+            body=(
+                f"Booking Confirmed! {booking.club.name} - {booking.sport.name} "
+                f"on {booking.date} at {booking.start_time}. Amount: ₹{booking.amount}"
+            ),
+            from_=twilio_from,
+            to=f"+91{user.mobile_number}"
+        )
+        logger.info(f"SMS sent to {user.mobile_number} for booking {booking_id}")
+        return f"SMS sent: {message.sid}"
+
+    except Exception as e:
+        logger.error(f"Failed to send SMS for booking {booking_id}: {e}")
+        return f"Failed: {str(e)}"
+
+
+@shared_task
+def send_otp_sms_task(mobile_number, otp_code):
+    """Send OTP via SMS"""
+    try:
+        twilio_sid = getattr(settings, 'TWILIO_ACCOUNT_SID', None)
+        twilio_token = getattr(settings, 'TWILIO_AUTH_TOKEN', None)
+        twilio_from = getattr(settings, 'TWILIO_PHONE_NUMBER', None)
+
+        if not all([twilio_sid, twilio_token, twilio_from]) or twilio_sid == 'None':
+            logger.info(f"DEV OTP for {mobile_number}: {otp_code}")
+            print(f"\n{'='*40}\nDEV OTP for {mobile_number}: {otp_code}\n{'='*40}\n")
+            return "Dev mode - OTP logged"
+
+        from twilio.rest import Client
+        client = Client(twilio_sid, twilio_token)
+        message = client.messages.create(
+            body=f"Your Sports Club OTP is: {otp_code}. Valid for 10 minutes.",
+            from_=twilio_from,
+            to=f"+91{mobile_number}"
+        )
+        return f"OTP SMS sent: {message.sid}"
+
+    except Exception as e:
+        logger.error(f"Error sending OTP SMS to {mobile_number}: {e}")
+        return f"Failed: {str(e)}"
+
 
 @shared_task
 def send_welcome_email_task(user_id):
@@ -201,157 +128,64 @@ def send_welcome_email_task(user_id):
     try:
         from django.contrib.auth import get_user_model
         User = get_user_model()
-        
         user = User.objects.get(id=user_id)
-        
-        subject = 'Welcome to Sports Club!'
-        message = f"""
-Dear {user.first_name},
 
-Welcome to Sports Club!
+        if not user.email:
+            return "No email address"
 
-Your account has been successfully created. You can now:
-- Browse available sports clubs
-- Book your favorite sports facilities
-- Manage your bookings
-- Leave reviews and ratings
-
-Start exploring and book your next game today!
-
-Best regards,
-Sports Club Team
-        """
-        
         send_mail(
-            subject,
-            message,
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-            fail_silently=False,
-        )
-        
-        logger.info(f"Welcome email sent to {user.email}")
-        return f"Welcome email sent to {user.email}"
-    except Exception as e:
-        logger.error(f"Error sending welcome email to user {user_id}: {str(e)}")
-        return f"Error: {str(e)}"
-    
-    
-@shared_task
-def notify_waitlisted_users(club_id, sport_id, date_str, start_time_str, end_time_str):
-    """Notify users on waitlist when a slot becomes available"""
-    try:
-        from .models import SlotWaitlist
-        from datetime import datetime
-        
-        date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        
-        # Get all users waiting for this slot who haven't been notified
-        waitlist = SlotWaitlist.objects.filter(
-            club_id=club_id,
-            sport_id=sport_id,
-            date=date,
-            start_time=start_time_str,
-            notified=False
-        ).select_related('user', 'club', 'sport').order_by('created_at')
-        
-        if not waitlist.exists():
-            return "No users on waitlist"
-        
-        notifications_sent = 0
-        
-        for entry in waitlist:
-            # Send SMS notification
-            try:
-                from twilio.rest import Client
-                client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-                
-                message_body = (
-                    f"Good news! The slot you wanted is now available:\n"
-                    f"{entry.club.name}\n"
-                    f"Sport: {entry.sport.name}\n"
-                    f"Date: {entry.date.strftime('%d-%m-%Y')}\n"
-                    f"Time: {entry.start_time.strftime('%I:%M %p')}\n"
-                    f"Book now before it's gone!"
-                )
-                
-                client.messages.create(
-                    body=message_body,
-                    from_=settings.TWILIO_PHONE_NUMBER,
-                    to=f"+91{entry.user.mobile_number}"
-                )
-                
-                logger.info(f"Slot availability SMS sent to {entry.user.mobile_number}")
-            except Exception as e:
-                logger.error(f"Error sending SMS to {entry.user.mobile_number}: {str(e)}")
-            
-            # Send Email notification
-            try:
-                subject = f"Slot Available - {entry.club.name}"
-                message = f"""
-Dear {entry.user.first_name},
+            subject='Welcome to Sports Club!',
+            message=f"""
+Dear {user.first_name or user.username},
 
-Great news! The slot you previously tried to book is now available:
+Welcome to Sports Club! Your account has been created successfully.
 
-Slot Details:
--------------
-Club: {entry.club.name}
-Location: {entry.club.location}
-Sport: {entry.sport.name}
-Date: {entry.date.strftime('%d %B, %Y')}
-Time: {entry.start_time.strftime('%I:%M %p')} - {entry.end_time.strftime('%I:%M %p')}
-Price: ₹{entry.sport.price_per_hour}
-
-This slot was previously locked by another user who didn't complete the payment.
-
-Book now before someone else takes it!
-
-Login here: http://localhost:3000
+You can now browse and book sports facilities at your favorite clubs.
 
 Best regards,
 Sports Club Team
-                """
-                
-                send_mail(
-                    subject,
-                    message,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [entry.user.email],
-                    fail_silently=False,
-                )
-                
-                logger.info(f"Slot availability email sent to {entry.user.email}")
-            except Exception as e:
-                logger.error(f"Error sending email to {entry.user.email}: {str(e)}")
-            
-            # Mark as notified
-            entry.notified = True
-            entry.save()
-            notifications_sent += 1
-        
-        logger.info(f"Notified {notifications_sent} users about available slot")
-        return f"Notified {notifications_sent} users"
-        
+            """,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@sportsclub.com'),
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+        return f"Welcome email sent to {user.email}"
+
     except Exception as e:
-        logger.error(f"Error notifying waitlisted users: {str(e)}")
-        return f"Error: {str(e)}"
+        logger.error(f"Failed to send welcome email: {e}")
+        return f"Failed: {str(e)}"
 
 
 @shared_task
-def cleanup_old_waitlist_entries():
-    """Clean up old waitlist entries (older than 7 days)"""
+def release_expired_slot_locks():
+    """Periodic task: release expired slot locks and cancel pending bookings"""
     try:
-        from .models import SlotWaitlist
-        from datetime import timedelta
-        
-        cutoff_date = timezone.now().date() - timedelta(days=7)
-        
-        deleted_count = SlotWaitlist.objects.filter(
-            date__lt=cutoff_date
-        ).delete()[0]
-        
-        logger.info(f"Cleaned up {deleted_count} old waitlist entries")
-        return f"Deleted {deleted_count} old waitlist entries"
+        from bookings.models import SlotLock, Booking
+        expired_locks = SlotLock.objects.filter(
+            expires_at__lt=timezone.now(),
+            is_converted=False
+        )
+        count = expired_locks.count()
+        for lock in expired_locks:
+            Booking.objects.filter(
+                club=lock.club,
+                sport=lock.sport,
+                date=lock.date,
+                start_time=lock.start_time,
+                status='pending'
+            ).update(status='cancelled')
+        expired_locks.delete()
+
+        # Also cancel stale pending bookings older than 15 minutes
+        cutoff = timezone.now() - timedelta(minutes=15)
+        stale_count = Booking.objects.filter(
+            status='pending',
+            created_at__lt=cutoff
+        ).update(status='cancelled')
+
+        logger.info(f"Released {count} expired locks, cancelled {stale_count} stale bookings")
+        return f"Released {count} locks, cancelled {stale_count} bookings"
+
     except Exception as e:
-        logger.error(f"Error cleaning up waitlist: {str(e)}")
-        return f"Error: {str(e)}"
+        logger.error(f"Slot lock cleanup failed: {e}")
+        return f"Failed: {str(e)}"
