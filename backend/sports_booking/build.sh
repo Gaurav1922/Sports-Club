@@ -18,9 +18,9 @@ python manage.py migrate
 
 """# Create sample data (optional - remove in production)
 python manage.py create_sample_data
-
+"""
 # Create superuser if it doesn't exist
-python manage.py shell << EOF
+python manage.py shell -c "
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(is_superuser=True).exists():
@@ -32,7 +32,7 @@ if not User.objects.filter(is_superuser=True).exists():
     print('Superuser created successfully')
 else:
     print('Superuser already exists')
-EOF
+"
 
-echo "Build completed successfully!"
-"""
+
+# echo "Build completed successfully!"
