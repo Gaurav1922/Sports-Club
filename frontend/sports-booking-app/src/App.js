@@ -1,20 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Calendar, Clock, MapPin, User, LogOut, CreditCard, Search, Menu, X, Star, Users, TrendingUp, DollarSign, Plus, Edit, Trash2, Lock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
-// Print styles — only the printable report content prints
-const printStyles = `
-@media print {
-  body * { visibility: hidden !important; }
-  #print-report, #print-report * { visibility: visible !important; }
-  #print-report {
-    position: fixed; top: 0; left: 0; width: 100%;
-    z-index: 9999; background: white; padding: 24px;
-  }
-  @page { margin: 1.5cm; size: A4 portrait; }
-}
-`;
-
-`const API_BASE_URL = 'http://localhost:8000/api';`
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
 const api = {
@@ -1238,7 +1224,14 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <style>{printStyles}</style>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          #print-report, #print-report * { visibility: visible !important; }
+          #print-report { position: fixed; top: 0; left: 0; width: 100%; z-index: 9999; background: white; padding: 24px; }
+          @page { margin: 1.5cm; size: A4 portrait; }
+        }
+      `}</style>
       <nav className="bg-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
