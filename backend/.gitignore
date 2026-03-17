@@ -1,1 +1,14 @@
-.env
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+logs/
+
+# VS Code (optional - only if you don't want to share editor settings)
+.vscode/
+
+# Celery
+celerybeat-schedule*
