@@ -41,10 +41,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'django_celery_beat',
-    'phonenumber_field',
     'rest_framework.authtoken',
-    'django_extensions',
-    'django_filters',
 
     'accounts',
     'clubs',
@@ -137,7 +134,6 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
     'DEFAULT_FILTER_BACKENDS': [
-        'django_filters.rest_framework.DjangoFilterBackend',
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
@@ -245,6 +241,12 @@ if not DEBUG:
     # Switch to Redis cache in production
     CACHES = {
         'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'sports-booking-cache',
+        }
+    }
+    """CACHES = {
+        'default': {
             'BACKEND': 'django_redis.cache.RedisCache',
             'LOCATION': REDIS_URL,
             'OPTIONS': {
@@ -253,7 +255,7 @@ if not DEBUG:
             'KEY_PREFIX': 'sports_booking',
             'TIMEOUT': 300,
         }
-    }
+    }"""
 
 # Logging Configuration
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
