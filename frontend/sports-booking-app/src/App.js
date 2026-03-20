@@ -381,7 +381,10 @@ function App() {
   const [otp, setOTP] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
-  const [devOtp, setDevOtp] = useState(null); // shows OTP on screen in dev mode
+  const [devOtp, setDevOtp] = useState(null);
+  const [adminPasscode, setAdminPasscode] = useState('');
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const ADMIN_PASSCODE = 'Admin@2026';
 
   const [regData, setRegData] = useState({
     username: '',
@@ -505,6 +508,41 @@ function App() {
     await loadUserDataWithToken(savedToken);
   };
 
+  const handleAdminPasscode = async () => {
+    setError('');
+    if (!mobile || mobile.length !== 10) { setError('Enter a valid 10-digit mobile number'); return; }
+    if (!adminPasscode) { setError('Enter the admin passcode'); return; }
+    if (adminPasscode !== ADMIN_PASSCODE) { setError('Invalid passcode'); return; }
+    setLoading(true);
+    try {
+      // Send OTP for admin and auto-verify with passcode bypass
+      const response = await api.sendOTP(mobile);
+      const data = await response.json();
+      if (response.ok) {
+        // Auto-fill and verify OTP directly
+        const otpResponse = await api.verifyOTP(mobile, data.otp || '000000');
+        const otpData = await otpResponse.json();
+        if (otpResponse.ok && otpData.access) {
+          const accessToken = otpData.access;
+          localStorage.setItem('token', accessToken);
+          setToken(accessToken);
+          await loadUserDataWithToken(accessToken);
+        } else {
+          // Fallback — show OTP flow
+          setOtpSent(true);
+          if (data.otp) setDevOtp(data.otp);
+          setShowAdminLogin(false);
+        }
+      } else {
+        setError(data.error || 'Failed to authenticate');
+      }
+    } catch (err) {
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSendOTP = async () => {
     setError('');
     setSuccess('');
@@ -559,10 +597,16 @@ function App() {
           setSuccess('Welcome back!');
           await loadUserDataWithToken(accessToken);
         } else {
-          // New user — go to registration
+          // New user — go to registration — clear previous user's data
           setIsVerified(true);
           setSuccess('OTP verified! Please complete registration.');
-          setRegData(prev => ({ ...prev, mobile_number: mobile }));
+          setRegData({
+            username: '',
+            email: '',
+            first_name: '',
+            last_name: '',
+            mobile_number: mobile
+          });
           setCurrentView('register');
         }
       } else {
@@ -623,6 +667,10 @@ function App() {
     setMobile('');
     setOTP('');
     setDevOtp(null);
+    setAdminPasscode('');
+    setShowAdminLogin(false);
+    // Clear registration form so next user starts fresh
+    setRegData({ username: '', email: '', first_name: '', last_name: '', mobile_number: '' });
   };
 
   const loadClubs = async () => {
@@ -1108,18 +1156,52 @@ function App() {
                 <input
                   type="tel"
                   value={mobile}
-                  onChange={(e) => setMobile(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSendOTP()}
+                  onChange={(e) => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  onKeyDown={(e) => e.key === 'Enter' && (showAdminLogin ? handleAdminPasscode() : handleSendOTP())}
                   placeholder="Enter 10-digit mobile number"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   maxLength="10"
                 />
               </div>
+
+              {/* Admin Passcode Section */}
+              {showAdminLogin && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Admin Passcode</label>
+                  <input
+                    type="password"
+                    value={adminPasscode}
+                    onChange={(e) => setAdminPasscode(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAdminPasscode()}
+                    placeholder="Enter admin passcode"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                </div>
+              )}
+
+              {showAdminLogin ? (
+                <button
+                  onClick={handleAdminPasscode}
+                  disabled={loading}
+                  className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition disabled:bg-gray-400"
+                >
+                  {loading ? 'Logging in...' : 'Login as Admin'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleSendOTP}
+                  disabled={loading}
+                  className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition disabled:bg-gray-400"
+                >
+                  {loading ? 'Sending...' : 'Send OTP'}
+                </button>
+              )}
+
               <button
-                onClick={handleSendOTP}
-                className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition"
+                onClick={() => { setShowAdminLogin(!showAdminLogin); setAdminPasscode(''); setError(''); }}
+                className="w-full text-xs text-gray-400 hover:text-gray-600 py-1"
               >
-                Send OTP
+                {showAdminLogin ? '← Back to OTP login' : 'Admin login'}
               </button>
             </div>
           )}
@@ -1195,7 +1277,11 @@ function App() {
                   <input
                     type="text"
                     value={regData.first_name}
-                    onChange={(e) => setRegData({ ...regData, first_name: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^a-zA-Z\s]/g, '');
+                      setRegData({ ...regData, first_name: val });
+                    }}
+                    placeholder="Enter first name"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
@@ -1204,7 +1290,11 @@ function App() {
                   <input
                     type="text"
                     value={regData.last_name}
-                    onChange={(e) => setRegData({ ...regData, last_name: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^a-zA-Z\s]/g, '');
+                      setRegData({ ...regData, last_name: val });
+                    }}
+                    placeholder="Enter last name"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
