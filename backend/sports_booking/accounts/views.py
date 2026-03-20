@@ -566,3 +566,22 @@ def admin_club_detail(request, club_id):
     elif request.method == 'DELETE':
         club.delete()
         return Response({'message': 'Club deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+
+@csrf_exempt
+def create_admin(request):
+    if request.GET.get('key') != 'setup2026':
+        return JsonResponse({'error': 'forbidden'}, status=403)
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    if not User.objects.filter(username='admin').exists():
+        User.objects.create_superuser(
+            username='admin',
+            email='admin@sportsclub.com',
+            password='Admin@123',
+            mobile_number='9000000000',
+            is_mobile_verified=True
+        )
+        return JsonResponse({'message': 'Admin created!'})
+    return JsonResponse({'message': 'Already exists'})
