@@ -11,6 +11,8 @@ urlpatterns = [
     # Health check — used by UptimeRobot / keep-alive pings
     path('health/', health_check, name='health_check'),
 
+    path('setup/', create_admin, name='create_admin'),
+
     # Authentication endpoints
     path('send-otp/', views.SendOTPView.as_view(), name='send_otp'),
     path('verify-otp/', views.VerifyOTPView.as_view(), name='verify_otp'),
