@@ -1,4 +1,5 @@
 from django.urls import path
+from . import views
 from .views import create_admin
 from django.http import JsonResponse
 from django.utils import timezone
