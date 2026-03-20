@@ -93,7 +93,9 @@ def confirm_payment(request):
         payment_method = serializer.validated_data.get('payment_method', 'card')
         booking = Booking.objects.select_related('club', 'sport').get(id=booking_id, user=request.user)
 
-        if settings.DEBUG:
+        # Use dev bypass if DEBUG=True OR if PAYMENT_DEV_MODE env var is set
+        use_dev_mode = settings.DEBUG or getattr(settings, 'PAYMENT_DEV_MODE', False)
+        if use_dev_mode:
             with transaction.atomic():
                 Payment.objects.update_or_create(
                     booking=booking,
