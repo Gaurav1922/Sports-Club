@@ -79,7 +79,7 @@ class SendOTPView(APIView):
             'message': 'OTP sent successfully',
             'mobile_number': mobile_number,
             'expires_in' : 600,  # 10 mintutes in seconds
-            # 'otp' : otp_code if settings.DEBUG else None # shows in browser response
+            'otp' : otp_code if settings.DEBUG else None # shows in browser response
         }, status=status.HTTP_200_OK)
         
 
