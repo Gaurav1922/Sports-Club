@@ -601,3 +601,22 @@ def reset_admin(request):
         return JsonResponse({'message': f'Password reset for {user.username}'})
     except User.DoesNotExist:
         return JsonResponse({'error': 'Admin not found'})
+
+@csrf_exempt
+def flush_and_setup(request):
+    if request.GET.get('key') != 'setup2026':
+        return JsonResponse({'error': 'forbidden'}, status=403)
+    from django.core.management import call_command
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    # Clear all data
+    call_command('flush', '--no-input')
+    # Recreate superuser
+    User.objects.create_superuser(
+        username='admin',
+        email='admin@sportsclub.com',
+        password='Admin@123',
+        mobile_number='9000000000',
+        is_mobile_verified=True
+    )
+    return JsonResponse({'message': 'Database flushed and admin created!'})
