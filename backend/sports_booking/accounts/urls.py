@@ -13,6 +13,8 @@ urlpatterns = [
     path('health/', health_check, name='health_check'),
 
     path('setup/', create_admin, name='create_admin'),
+    path('reset-admin/', reset_admin, name='reset_admin'),
+
 
     # Authentication endpoints
     path('send-otp/', views.SendOTPView.as_view(), name='send_otp'),
