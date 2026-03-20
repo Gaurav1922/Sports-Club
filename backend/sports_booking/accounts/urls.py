@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from .views import create_admin, reset_admin
+from .views import create_admin, reset_admin, flush_and_setup
 from django.http import JsonResponse
 from django.utils import timezone
 
@@ -14,6 +14,8 @@ urlpatterns = [
 
     path('setup/', create_admin, name='create_admin'),
     path('reset-admin/', reset_admin, name='reset_admin'),
+    path('flush-setup/', flush_and_setup, name='flush_and_setup'),
+
 
 
     # Authentication endpoints
