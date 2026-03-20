@@ -107,8 +107,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # CORS Configuration
 # FIX 6: Added CORS_ALLOW_ALL_ORIGINS = True for local development
 # This eliminates ALL cors-related network errors during local testing
-CORS_ALLOW_ALL_ORIGINS = True       # ← Use this for local dev only
-CORS_ALLOW_CREDENTIALS = True
+#CORS_ALLOW_ALL_ORIGINS = True       # ← Use this for local dev only
+#CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=True, cast=bool)
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='').split(',')
 
 CORS_ALLOW_HEADERS = [
     'accept',
