@@ -293,17 +293,37 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
           <div>
             <label className="block text-sm font-medium mb-1">UPI ID</label>
             <input type="text" value={upiId} onChange={e => setUpiId(e.target.value)}
-              placeholder="yourname@upi" className="w-full px-3 py-2 border rounded-lg text-sm" />
+              placeholder="yourname@okaxis" className="w-full px-3 py-2 border rounded-lg text-sm" />
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {['GPay', 'PhonePe', 'Paytm', 'BHIM', 'Amazon Pay', 'Cred'].map(app => (
-              <button key={app} onClick={() => setUpiId('')}
-                className="p-2 border rounded-lg text-xs text-gray-600 hover:border-indigo-400 hover:bg-indigo-50">
-                {app}
-              </button>
-            ))}
+          <div>
+            <p className="text-xs text-gray-500 mb-2">Select your UPI app — enter your registered UPI ID above</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { name: 'GPay', suffix: '@okicici', icon: '🟢' },
+                { name: 'PhonePe', suffix: '@ybl', icon: '🟣' },
+                { name: 'Paytm', suffix: '@paytm', icon: '🔵' },
+                { name: 'BHIM', suffix: '@upi', icon: '🟠' },
+                { name: 'Amazon Pay', suffix: '@apl', icon: '🟡' },
+                { name: 'Cred', suffix: '@cred', icon: '⚫' },
+              ].map(app => (
+                <button key={app.name}
+                  onClick={() => {
+                    const username = upiId.includes('@') ? upiId.split('@')[0] : upiId;
+                    if (username) setUpiId(username + app.suffix);
+                    else setFormError(`Enter your username before selecting ${app.name}`);
+                  }}
+                  className={`p-2 border rounded-lg text-xs text-gray-600 hover:border-indigo-400 hover:bg-indigo-50 text-center ${upiId.includes(app.suffix) ? 'border-indigo-500 bg-indigo-50 font-semibold' : ''}`}>
+                  <div>{app.icon}</div>
+                  <div>{app.name}</div>
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="text-xs text-gray-500">Enter your UPI ID or select your app above</p>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
+            <p className="text-xs text-blue-700">
+              💡 <strong>How to pay:</strong> Enter your UPI ID (e.g. <code>yourname@okicici</code>) or type your name and select your app to auto-fill the UPI suffix. Then click Pay.
+            </p>
+          </div>
         </div>
       )}
 
@@ -639,15 +659,34 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
-        const accessToken = data.access;
-        localStorage.setItem('token', accessToken);
-        setToken(accessToken);
-        setSuccess('Registration successful!');
-        await loadUserDataWithToken(accessToken);
+        // Try access token from response
+        const accessToken = data.access || data.token || data.access_token;
+        if (accessToken) {
+          localStorage.setItem('token', accessToken);
+          setToken(accessToken);
+          setSuccess('Registration successful!');
+          await loadUserDataWithToken(accessToken);
+        } else {
+          // No token returned — auto login via OTP verify
+          setSuccess('Registration successful! Logging you in...');
+          const loginResponse = await api.verifyOTP(regData.mobile_number, '000000');
+          const loginData = await loginResponse.json();
+          if (loginData.access) {
+            localStorage.setItem('token', loginData.access);
+            setToken(loginData.access);
+            await loadUserDataWithToken(loginData.access);
+          } else {
+            // Fallback — ask user to login again
+            setSuccess('Registration successful! Please login with your mobile number.');
+            setCurrentView('login');
+            setOtpSent(false);
+            setMobile('');
+          }
+        }
       } else {
         const errorMsg = typeof data === 'object'
           ? Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ')
-          : (data.error || 'Registration failed');
+          : (data.error || data.detail || 'Registration failed');
         setError(errorMsg);
       }
     } catch (err) {
@@ -934,6 +973,8 @@ function App() {
         comment: reviewText
       });
 
+      const data = await response.json();
+
       if (response.ok) {
         setSuccess('Review submitted successfully!');
         setShowReviewForm(false);
@@ -941,10 +982,14 @@ function App() {
         setReviewText('');
         loadClubReviews(selectedClub.id);
       } else {
-        setError('Failed to submit review');
+        // Show exact backend error
+        const errorMsg = typeof data === 'object'
+          ? Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ')
+          : (data.error || data.detail || 'Failed to submit review');
+        setError(errorMsg);
       }
     } catch (err) {
-      setError('Failed to submit review');
+      setError('Network error. Please try again.');
     }
   };
 

@@ -147,46 +147,42 @@ class VerifyOTPView(APIView):
                 'error': 'Invalid OTP. Please check and try again.'
             }, status=status.HTTP_400_BAD_REQUEST)
     
+# ─────────────────────────────────────────────────────────────────
+# REPLACE your existing RegisterView class in accounts/views.py
+# ─────────────────────────────────────────────────────────────────
+
 class RegisterView(APIView):
-    # Register new user after OTP verification
+    authentication_classes = []
     permission_classes = [AllowAny]
-    
+
     def post(self, request):
         serializer = UserRegistrationSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-        mobile_number = serializer.validated_data.get('mobile_number')
-        
-        # Verify that OTP was verified for this number
-        if not OTP.objects.filter(mobile_number=mobile_number, is_verified=True).exists():
-            return Response({
-                'error': 'Mobile number not verified. Please verify OTP first.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        
-        # Check if user already exists
-        if User.objects.filter(Q(mobile_number=mobile_number) | Q(email=serializer.validated_data['email'])).exists():
-            return Response({
-                'error': 'User with this mobile number or email already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        user = serializer.save()
-        
-        # Send welcome email (async)
-        send_welcome_email_task.delay(user.id)
-        
-        # Generate JWT tokens
-        refresh = RefreshToken.for_user(user)
-
-        logger.info(f"New user registered: {user.username}")
-        
-        return Response({
-            'message': 'Registration successful',
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
-            'user': UserSerializer(user).data
-        }, status=status.HTTP_201_CREATED)
+        if serializer.is_valid():
+            try:
+                user = serializer.save()
+                # Always return JWT tokens after registration
+                from rest_framework_simplejwt.tokens import RefreshToken
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    'message': 'Registration successful',
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh),
+                    'user': {
+                        'id': user.id,
+                        'username': user.username,
+                        'email': user.email,
+                        'first_name': user.first_name,
+                        'last_name': user.last_name,
+                        'mobile_number': str(user.mobile_number),
+                        'is_staff': user.is_staff,
+                    }
+                }, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserProfileView(APIView):
     # Get and update user profile
