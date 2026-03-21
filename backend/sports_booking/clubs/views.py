@@ -31,12 +31,17 @@ class ReviewViewSet(viewsets.ModelViewSet):
         club_id = self.kwargs.get('club_pk') or self.request.query_params.get('club')
         if club_id:
             return Review.objects.filter(club_id=club_id).select_related('user')
-        return Review.objects.filter(
-            club__reviews__isnull=False
-        ).select_related('user').order_by('-created_at')
+        return Review.objects.select_related('user').order_by('-created_at')
 
     def perform_create(self, serializer):
         club_id = self.request.data.get('club')
+        if not club_id:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'club': 'Club ID is required'})
+        # Check for duplicate review
+        if Review.objects.filter(club_id=club_id, user=self.request.user).exists():
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'detail': 'You have already reviewed this club'})
         serializer.save(user=self.request.user, club_id=club_id)
 
 
