@@ -48,7 +48,8 @@ def create_payment_intent(request):
         booking = Booking.objects.select_related('club', 'sport').get(id=booking_id, user=request.user)
         if booking.status != 'pending':
             return Response({'error': 'Booking is not in pending state'}, status=status.HTTP_400_BAD_REQUEST)
-        if settings.DEBUG:
+        # if settings.DEBUG:
+        if True:
             return Response({
                 'client_secret': f'dev_secret_{booking.id}',
                 'payment_intent_id': f'pi_dev_{booking.id}',
@@ -94,7 +95,8 @@ def confirm_payment(request):
         booking = Booking.objects.select_related('club', 'sport').get(id=booking_id, user=request.user)
 
         # Use dev bypass if DEBUG=True OR if PAYMENT_DEV_MODE env var is set
-        use_dev_mode = settings.DEBUG or getattr(settings, 'PAYMENT_DEV_MODE', False)
+        # use_dev_mode = settings.DEBUG or getattr(settings, 'PAYMENT_DEV_MODE', False)
+        use_dev_mode = True
         if use_dev_mode:
             with transaction.atomic():
                 Payment.objects.update_or_create(
