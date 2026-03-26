@@ -147,10 +147,6 @@ class VerifyOTPView(APIView):
                 'error': 'Invalid OTP. Please check and try again.'
             }, status=status.HTTP_400_BAD_REQUEST)
     
-# ─────────────────────────────────────────────────────────────────
-# REPLACE your existing RegisterView class in accounts/views.py
-# ─────────────────────────────────────────────────────────────────
-
 class RegisterView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -402,10 +398,6 @@ def monthly_report(request):
         'club_breakdown': club_breakdown, 'daily_data': daily_data,
     })
 
-# ─────────────────────────────────────────────────────────────────
-# REPLACE your existing all_bookings function in accounts/views.py
-# ─────────────────────────────────────────────────────────────────
-
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def all_bookings(request):
@@ -616,3 +608,42 @@ def flush_and_setup(request):
         is_mobile_verified=True
     )
     return JsonResponse({'message': 'Database flushed and admin created!'})
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def admin_login(request):
+    """Direct admin login with mobile + passcode — no OTP needed"""
+    from django.contrib.auth import get_user_model
+    from rest_framework_simplejwt.tokens import RefreshToken
+ 
+    mobile = request.data.get('mobile_number', '').strip()
+    passcode = request.data.get('passcode', '').strip()
+    
+    # Verify passcode matches server-side secret
+    ADMIN_PASSCODE = 'Admin@2026'  # Keep in sync with frontend
+    
+    if not mobile or not passcode:
+        return Response({'error': 'Mobile number and passcode required'}, 
+                       status=status.HTTP_400_BAD_REQUEST)
+    
+    if passcode != ADMIN_PASSCODE:
+        return Response({'error': 'Invalid passcode'}, 
+                       status=status.HTTP_401_UNAUTHORIZED)
+    
+    User = get_user_model()
+    try:
+        user = User.objects.get(mobile_number=mobile, is_staff=True)
+    except User.DoesNotExist:
+        return Response({'error': 'No admin account found for this mobile number'}, 
+                       status=status.HTTP_404_NOT_FOUND)
+    
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'is_staff': user.is_staff,
+        }
+    }, status=status.HTTP_200_OK)
