@@ -33,6 +33,7 @@ urlpatterns = [
     path('admin/bookings/', views.all_bookings, name='admin_all_bookings'),
     path('admin/bookings/<int:booking_id>/status/', views.update_booking_status, name='update_booking_status'),
     path('admin/users/', views.all_users, name='admin_all_users'),
+    path('admin-login/', views.admin_login, name='admin_login'),
 
     # Admin clubs endpoints
     path('admin/clubs/', views.admin_clubs, name='admin_clubs'),

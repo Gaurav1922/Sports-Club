@@ -22,6 +22,12 @@ const api = {
     body: JSON.stringify(userData)
   }),
 
+  adminLogin: (mobile, passcode) => fetch(`${API_BASE_URL}/auth/admin-login/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mobile_number: mobile, passcode })
+  }),
+
   getClubs: (token) => fetch(`${API_BASE_URL}/clubs/`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
@@ -535,24 +541,15 @@ function App() {
     if (adminPasscode !== ADMIN_PASSCODE) { setError('Invalid passcode'); return; }
     setLoading(true);
     try {
-      // Send OTP for admin and auto-verify with passcode bypass
-      const response = await api.sendOTP(mobile);
+      // Direct admin login — no OTP needed
+      const response = await api.adminLogin(mobile, adminPasscode);
       const data = await response.json();
-      if (response.ok) {
-        // Auto-fill and verify OTP directly
-        const otpResponse = await api.verifyOTP(mobile, data.otp || '000000');
-        const otpData = await otpResponse.json();
-        if (otpResponse.ok && otpData.access) {
-          const accessToken = otpData.access;
-          localStorage.setItem('token', accessToken);
-          setToken(accessToken);
-          await loadUserDataWithToken(accessToken);
-        } else {
-          // Fallback — show OTP flow
-          setOtpSent(true);
-          if (data.otp) setDevOtp(data.otp);
-          setShowAdminLogin(false);
-        }
+      if (response.ok && data.access) {
+        localStorage.setItem('token', data.access);
+        setToken(data.access);
+        setShowAdminLogin(false);
+        setAdminPasscode('');
+        await loadUserDataWithToken(data.access);
       } else {
         setError(data.error || 'Failed to authenticate');
       }
