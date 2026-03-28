@@ -10,13 +10,25 @@ class SportSerializer(serializers.ModelSerializer):
 
 class ClubSerializer(serializers.ModelSerializer):
     sports = SportSerializer(many=True, read_only=True)
+    average_rating = serializers.SerializerMethodField()
+    total_reviews = serializers.SerializerMethodField()
 
     class Meta:
         model = Club
         fields = [
             'id', 'name', 'location', 'phone_number', 'opening_time',
-            'closing_time', 'description', 'is_active', 'sports'
+            'closing_time', 'description', 'is_active', 'sports',
+            'average_rating', 'total_reviews'
         ]
+
+    def get_average_rating(self, obj):
+        reviews = obj.reviews.all()
+        if not reviews:
+            return None
+        return round(sum(r.rating for r in reviews) / len(reviews), 1)
+
+    def get_total_reviews(self, obj):
+        return obj.reviews.count()
 
     def validate_phone_number(self, value):
         if value and not value.isdigit():
