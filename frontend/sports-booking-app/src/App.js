@@ -394,6 +394,36 @@ const StarRating = ({ rating, onRatingChange, readonly = false }) => {
   );
 };
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="bg-white rounded-xl shadow-lg p-8 max-w-md text-center">
+            <div className="text-4xl mb-4">⚠️</div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Something went wrong</h2>
+            <p className="text-gray-500 text-sm mb-6">{this.state.error?.message || 'An unexpected error occurred'}</p>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              Reload App
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [currentView, setCurrentView] = useState('login');
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -996,10 +1026,20 @@ function App() {
       const response = await api.getReviews(token, clubId);
       if (response.ok) {
         const data = await response.json();
-        setClubReviews(data);
+        // Always set an array — handle paginated or direct responses
+        if (Array.isArray(data)) {
+          setClubReviews(data);
+        } else if (data.results && Array.isArray(data.results)) {
+          setClubReviews(data.results);
+        } else {
+          setClubReviews([]);
+        }
+      } else {
+        setClubReviews([]);
       }
     } catch (err) {
       console.error('Failed to load reviews');
+      setClubReviews([]);
     }
   };
 
@@ -1671,7 +1711,7 @@ function App() {
                             </div>
                             {club.sports.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">
-                                {club.sports.map((s, j) => (
+                                {(club.sports || []).map((s, j) => (
                                   <span key={j} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded text-xs">
                                     {s.name}: {s.bookings} · ₹{s.revenue.toLocaleString('en-IN')}
                                   </span>
@@ -2192,7 +2232,7 @@ function App() {
                     </div>
                     {club.sports && club.sports.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {club.sports.map(s => (
+                        {(club.sports || []).map(s => (
                           <span key={s.id} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">
                             {s.name} — ₹{s.price_per_hour}/hr
                           </span>
@@ -2531,16 +2571,26 @@ function App() {
                       <Clock className="w-5 h-5" />
                       <span>{selectedClub.opening_time} - {selectedClub.closing_time}</span>
                     </div>
-                    {selectedClub.average_rating && (
+                    {selectedClub.average_rating != null && (
                       <div className="flex items-center gap-2">
-                        <StarRating rating={selectedClub.average_rating} readonly />
-                        <span className="text-sm">({selectedClub.total_reviews} reviews)</span>
+                        <StarRating rating={selectedClub.average_rating || 0} readonly />
+                        <span className="text-sm">({selectedClub.total_reviews || 0} reviews)</span>
                       </div>
                     )}
                   </div>
 
                   <button
-                    onClick={() => setCurrentView('book-slot')}
+                    onClick={async () => {
+                      // Reload full club data to ensure sports are available
+                      try {
+                        const res = await api.getClubDetails(token, selectedClub.id);
+                        if (res.ok) {
+                          const fullClub = await res.json();
+                          setSelectedClub(fullClub);
+                        }
+                      } catch (e) {}
+                      setCurrentView('book-slot');
+                    }}
                     className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 mb-4"
                   >
                     Book Now
@@ -2588,20 +2638,20 @@ function App() {
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="text-lg font-bold text-gray-800">
                       Customer Reviews
-                      {clubReviews.length > 0 && (
+                      {clubReviews && clubReviews.length > 0 && (
                         <span className="ml-2 text-sm font-normal text-gray-500">({clubReviews.length})</span>
                       )}
                     </h4>
                     <button onClick={() => loadClubReviews(selectedClub.id)}
                       className="text-xs text-indigo-500 hover:text-indigo-700">↻ Refresh</button>
                   </div>
-                  {clubReviews.length === 0 ? (
+                  {(!clubReviews || clubReviews.length === 0) ? (
                     <div className="text-center py-6">
                       <p className="text-gray-400 text-sm">No reviews yet — be the first to review!</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {clubReviews.map((review) => (
+                      {(clubReviews || []).map((review) => (
                         <div key={review.id} className="border-b border-gray-100 pb-4 last:border-0">
                           <div className="flex justify-between items-start mb-1">
                             <div>
@@ -2659,8 +2709,19 @@ function App() {
                       )}
                     </div>
                     <button
-                      onClick={() => {
-                        setSelectedClub(club);
+                      onClick={async () => {
+                        // Load full club details including sports
+                        try {
+                          const res = await api.getClubDetails(token, club.id);
+                          if (res.ok) {
+                            const fullClub = await res.json();
+                            setSelectedClub(fullClub);
+                          } else {
+                            setSelectedClub(club);
+                          }
+                        } catch (e) {
+                          setSelectedClub(club);
+                        }
                         loadClubReviews(club.id);
                         setBookingForm(prev => ({ ...prev, club: club.id, sport: null }));
                       }}
@@ -3142,4 +3203,10 @@ function App() {
   );
 }
 
-export default App;
+export default function WrappedApp() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
