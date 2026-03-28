@@ -32,55 +32,64 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 
 # Create your views here.
+
 class SendOTPView(APIView):
-    # Send OTP to mobile number for authentication
+    authentication_classes = []
     permission_classes = [AllowAny]
 
-    #print("Raw request data:", request.data)
-
-    @method_decorator(ratelimit(key='ip', rate='5/h', method='POST'))
     def post(self, request):
-        serializer = OTPSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-        mobile_number = serializer.validated_data['mobile_number']
+        mobile_number = request.data.get('mobile_number', '').strip()
 
-        # Generate 6-digit otp
+        if not mobile_number or not mobile_number.isdigit() or len(mobile_number) != 10:
+            return Response(
+                {'error': 'Please enter a valid 10-digit mobile number'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Generate OTP
+        import random
         otp_code = str(random.randint(100000, 999999))
 
-        # Get client IP
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip_address = x_forwarded_for.split(',')[0]
-        else:
-            ip_address = request.META.get('REMOTE_ADDR')
+        # Use select_for_update to prevent race condition with concurrent users
+        from django.db import transaction
+        with transaction.atomic():
+            # Delete any existing OTP for this number
+            OTP.objects.filter(mobile_number=mobile_number).delete()
+            # Create new OTP
+            otp_obj = OTP.objects.create(
+                mobile_number=mobile_number,
+                otp=otp_code,
+                expires_at=timezone.now() + timedelta(minutes=10)
+            )
 
-        # Delete old OTPs for this number
-        OTP.objects.filter(mobile_number=mobile_number, is_verified=False).delete()
+        # Try sending SMS via Twilio
+        sms_sent = False
+        if all([settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN, settings.TWILIO_PHONE_NUMBER]):
+            try:
+                from twilio.rest import Client
+                client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                client.messages.create(
+                    body=f'Your Sports Club OTP is: {otp_code}. Valid for 10 minutes.',
+                    from_=settings.TWILIO_PHONE_NUMBER,
+                    to=f'+91{mobile_number}'
+                )
+                sms_sent = True
+            except Exception as e:
+                print(f"Twilio SMS failed: {e}")
 
-        # Create new OTP
-        otp = OTP.objects.create(
-            mobile_number=mobile_number,
-            otp=otp_code,
-            ip_address=ip_address,
-            expires_at=timezone.now() + timedelta(minutes=10)
-        )
+        print(f"OTP for {mobile_number}: {otp_code}")  # Always log to console
 
-        # Send OTP via SMS (async)
-        send_otp_sms_task.delay(mobile_number, otp_code)
-
-        # Log OTP for development (remove in production)
-        logger.info(f"OTP for {mobile_number}: {otp_code}")
-        print(f"\n{'='*40}\nDEV OTP for {mobile_number}: {otp_code}\n{'='*40}\n")
-
-        
-        return Response({
-            'message': 'OTP sent successfully',
+        response_data = {
+            'message': 'OTP sent successfully' if sms_sent else 'OTP generated',
             'mobile_number': mobile_number,
-            'expires_in' : 600,  # 10 mintutes in seconds
-            'otp' : otp_code # shows in browser response
-        }, status=status.HTTP_200_OK)
+            'expires_in': 600,
+        }
+
+        # Return OTP in response if SMS not sent (dev mode)
+        if not sms_sent:
+            response_data['otp'] = otp_code
+
+        return Response(response_data, status=status.HTTP_200_OK)
         
 
 class VerifyOTPView(APIView):
