@@ -195,6 +195,7 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
   const [cardName, setCardName] = useState('');
   const [upiId, setUpiId] = useState('');
   const [netbankingBank, setNetbankingBank] = useState('');
+  const [selectedWallet, setSelectedWallet] = useState('');
   const [processing, setProcessing] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -226,6 +227,8 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
       if (!upiId.includes('@')) { setFormError('Enter a valid UPI ID (e.g. name@upi).'); return; }
     } else if (paymentMode === 'netbanking') {
       if (!netbankingBank) { setFormError('Please select your bank.'); return; }
+    } else if (paymentMode === 'wallet') {
+      if (!selectedWallet) { setFormError('Please select a wallet to continue.'); return; }
     }
     setProcessing(true);
     setTimeout(() => {
@@ -253,7 +256,7 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
         {modes.map(m => (
           <button
             key={m.id}
-            onClick={() => { setPaymentMode(m.id); setFormError(''); }}
+            onClick={() => { setPaymentMode(m.id); setFormError(''); setSelectedWallet(''); }}
             className={`p-2 rounded-lg border text-center transition ${paymentMode === m.id ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'}`}
           >
             <div className="text-lg">{m.label.split(' ')[0]}</div>
@@ -355,12 +358,20 @@ const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
           <label className="block text-sm font-medium mb-2">Select Wallet</label>
           <div className="grid grid-cols-2 gap-2">
             {['Paytm Wallet', 'Amazon Pay', 'Mobikwik', 'Freecharge', 'Airtel Money', 'Jio Money'].map(w => (
-              <button key={w} onClick={() => { setFormError(''); handleSubmit(); }}
-                className="p-3 border rounded-lg text-sm text-gray-700 hover:border-indigo-500 hover:bg-indigo-50 text-left">
-                {w}
+              <button key={w}
+                onClick={() => { setSelectedWallet(w); setFormError(''); }}
+                className={`p-3 border rounded-lg text-sm text-left transition ${
+                  selectedWallet === w
+                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-semibold'
+                    : 'border-gray-200 text-gray-700 hover:border-indigo-400 hover:bg-indigo-50'
+                }`}>
+                {selectedWallet === w ? '✓ ' : ''}{w}
               </button>
             ))}
           </div>
+          {selectedWallet && (
+            <p className="text-xs text-green-600 mt-2">✓ {selectedWallet} selected — click Pay to continue</p>
+          )}
         </div>
       )}
 
