@@ -210,7 +210,7 @@ User selects Club → Chooses Sport → Picks Date
 - Confirmed + paid bookings get refunded on cancellation
 
 ---
-
+"""
 ## 📸 Screenshots
 
 | Feature | Description |
@@ -223,7 +223,7 @@ User selects Club → Chooses Sport → Picks Date
 | Monthly Report | Club-wise breakdown, daily table, printable |
 
 ---
-
+"""
 ## 🤝 Contributing
 
 1. Fork the repository
