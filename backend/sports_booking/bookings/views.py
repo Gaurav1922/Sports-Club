@@ -76,9 +76,14 @@ class BookingViewSet(viewsets.ModelViewSet):
             ).update(status='cancelled')
         expired_locks.delete()
 
-        # Get sport price
+        # Get sport price and check active status
         try:
             sport = Sport.objects.get(id=sport_id)
+            if not sport.is_active:
+                return Response(
+                    {'error': 'This sport is currently not available for booking'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             price = sport.price_per_hour
         except Sport.DoesNotExist:
             return Response(
@@ -168,6 +173,20 @@ class BookingViewSet(viewsets.ModelViewSet):
                 return Response(
                     {'error': f'Bookings can only be made up to 15 days in advance (latest: {max_date}).'},
                     status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Check sport is active
+            try:
+                sport = Sport.objects.get(id=sport_id)
+                if not sport.is_active:
+                    return Response(
+                        {'error': 'This sport is currently not available for booking.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except Sport.DoesNotExist:
+                return Response(
+                    {'error': 'Sport not found.'},
+                    status=status.HTTP_404_NOT_FOUND
                 )
 
             # Check if slot is already booked

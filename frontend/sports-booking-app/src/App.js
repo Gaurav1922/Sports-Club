@@ -2241,13 +2241,18 @@ function App() {
                       <Clock className="w-4 h-4" />
                       <span>{club.opening_time} - {club.closing_time}</span>
                     </div>
-                    {club.sports && club.sports.length > 0 && (
+                    {club.sports && club.sports.filter(s => s.is_active).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {(club.sports || []).map(s => (
+                        {(club.sports || []).filter(s => s.is_active).map(s => (
                           <span key={s.id} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">
                             {s.name} — ₹{s.price_per_hour}/hr
                           </span>
                         ))}
+                        {club.sports.some(s => !s.is_active) && (
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-400 text-xs rounded-full">
+                            + some unavailable
+                          </span>
+                        )}
                       </div>
                     )}
                     {(!club.sports || club.sports.length === 0) && (
@@ -2783,10 +2788,17 @@ function App() {
                     }}
                   >
                     <option value="">Choose a sport</option>
-                    {selectedClub.sports?.map(sport => (
-                      <option key={sport.id} value={sport.id}>{sport.name}</option>
+                    {selectedClub.sports?.filter(sport => sport.is_active).map(sport => (
+                      <option key={sport.id} value={sport.id}>
+                        {sport.name} — ₹{sport.price_per_hour}/hr
+                      </option>
                     ))}
                   </select>
+                  {selectedClub.sports?.some(s => !s.is_active) && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      * Some sports are currently unavailable
+                    </p>
+                  )}
                 </div>
 
                 <div>
