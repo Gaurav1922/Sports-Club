@@ -90,7 +90,7 @@ const api = {
     body: JSON.stringify(reviewData)
   }),
 
-  getReviews: (token, clubId) => fetch(`${API_BASE_URL}/clubs/${clubId}/reviews/`, {
+  getReviews: (token, clubId) => fetch(`${API_BASE_URL}/clubs/reviews/?club=${clubId}`, {
     headers: { 'Authorization': `Bearer ${token}` }
   }),
 
@@ -977,7 +977,8 @@ function App() {
         setShowReviewForm(false);
         setReviewRating(5);
         setReviewText('');
-        loadClubReviews(selectedClub.id);
+        // Reload reviews to show the new one immediately
+        await loadClubReviews(selectedClub.id);
       } else {
         // Show exact backend error
         const errorMsg = typeof data === 'object'
@@ -1160,6 +1161,36 @@ function App() {
       if (currentView === 'admin-clubs' && user?.is_staff) loadClubs();
     }
   }, [currentView, token]);
+
+  // Auto-refresh admin dashboard every 30 seconds
+  useEffect(() => {
+    if (!token || !user?.is_staff) return;
+    if (currentView !== 'admin-dashboard') return;
+    const interval = setInterval(() => {
+      loadDashboardStats();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [currentView, token, user]);
+
+  // Auto-refresh all bookings every 20 seconds when on admin-bookings
+  useEffect(() => {
+    if (!token || !user?.is_staff) return;
+    if (currentView !== 'admin-bookings') return;
+    const interval = setInterval(() => {
+      loadAllBookings();
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [currentView, token, user]);
+
+  // Auto-refresh available slots every 15 seconds when booking
+  useEffect(() => {
+    if (!token || currentView !== 'booking') return;
+    if (!bookingForm.club || !bookingForm.sport || !bookingForm.date) return;
+    const interval = setInterval(() => {
+      loadAvailableSlots(bookingForm.club, bookingForm.sport, bookingForm.date);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [currentView, token, bookingForm.club, bookingForm.sport, bookingForm.date]);
 
   const filteredClubs = clubs.filter(club =>
     club.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1811,7 +1842,14 @@ function App() {
         {currentView === 'admin-dashboard' && user?.is_staff && (
           <div>
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-3xl font-bold text-gray-800">Admin Dashboard</h2>
+              <div>
+                <h2 className="text-3xl font-bold text-gray-800">Admin Dashboard</h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse inline-block"></span>
+                  <span className="text-xs text-gray-400">Auto-refreshing every 30s</span>
+                  <button onClick={loadDashboardStats} className="text-xs text-indigo-500 hover:text-indigo-700 ml-2">↻ Refresh now</button>
+                </div>
+              </div>
               <button
                 onClick={async () => {
                   try {
@@ -2511,17 +2549,17 @@ function App() {
                   <button
                     onClick={() => {
                       setShowReviewForm(!showReviewForm);
-                      if (!showReviewForm) loadClubReviews(selectedClub.id);
                     }}
                     className="w-full border border-indigo-600 text-indigo-600 py-2 rounded-lg hover:bg-indigo-50"
                   >
-                    {showReviewForm ? 'Hide Reviews' : 'View Reviews & Rate'}
+                    {showReviewForm ? 'Cancel Review' : '⭐ Write a Review'}
                   </button>
                 </div>
 
+                {/* Write Review Form */}
                 {showReviewForm && (
-                  <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-                    <h4 className="text-xl font-bold mb-4">Write a Review</h4>
+                  <div className="bg-white rounded-lg shadow-md p-6 mb-4">
+                    <h4 className="text-lg font-bold mb-4">Write a Review</h4>
                     <div className="mb-4">
                       <label className="block text-sm font-medium mb-2">Your Rating</label>
                       <StarRating rating={reviewRating} onRatingChange={setReviewRating} />
@@ -2542,28 +2580,42 @@ function App() {
                     >
                       Submit Review
                     </button>
-
-                    {clubReviews.length > 0 && (
-                      <div className="mt-6">
-                        <h4 className="text-lg font-bold mb-4">Customer Reviews</h4>
-                        <div className="space-y-4">
-                          {clubReviews.map((review) => (
-                            <div key={review.id} className="border-b pb-4">
-                              <div className="flex justify-between items-start mb-2">
-                                <div>
-                                  <p className="font-semibold">{review.user_name}</p>
-                                  <StarRating rating={review.rating} readonly />
-                                </div>
-                                <span className="text-sm text-gray-500">{new Date(review.created_at).toLocaleDateString()}</span>
-                              </div>
-                              <p className="text-gray-700">{review.comment}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
+
+                {/* Reviews Display — always visible */}
+                <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="text-lg font-bold text-gray-800">
+                      Customer Reviews
+                      {clubReviews.length > 0 && (
+                        <span className="ml-2 text-sm font-normal text-gray-500">({clubReviews.length})</span>
+                      )}
+                    </h4>
+                    <button onClick={() => loadClubReviews(selectedClub.id)}
+                      className="text-xs text-indigo-500 hover:text-indigo-700">↻ Refresh</button>
+                  </div>
+                  {clubReviews.length === 0 ? (
+                    <div className="text-center py-6">
+                      <p className="text-gray-400 text-sm">No reviews yet — be the first to review!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {clubReviews.map((review) => (
+                        <div key={review.id} className="border-b border-gray-100 pb-4 last:border-0">
+                          <div className="flex justify-between items-start mb-1">
+                            <div>
+                              <p className="font-semibold text-gray-800 text-sm">{review.user_name}</p>
+                              <StarRating rating={review.rating} readonly />
+                            </div>
+                            <span className="text-xs text-gray-400">{new Date(review.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                          </div>
+                          <p className="text-gray-600 text-sm mt-1">{review.comment}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : clubs.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-lg shadow">
