@@ -248,4 +248,3 @@ This project is for educational and portfolio purposes.
 
 ---
 
-*Built with ❤️ using Django + React*
