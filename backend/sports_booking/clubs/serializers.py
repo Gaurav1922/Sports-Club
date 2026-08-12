@@ -22,13 +22,12 @@ class ClubSerializer(serializers.ModelSerializer):
         ]
 
     def get_average_rating(self, obj):
-        reviews = obj.reviews.all()
-        if not reviews:
-            return None
-        return round(sum(r.rating for r in reviews) / len(reviews), 1)
+        # Single source of truth — the model property (now prefetch-safe
+        # via len() instead of duplicating the same logic here).
+        return obj.average_rating
 
     def get_total_reviews(self, obj):
-        return obj.reviews.count()
+        return obj.total_reviews
 
     def validate_phone_number(self, value):
         if value and not value.isdigit():

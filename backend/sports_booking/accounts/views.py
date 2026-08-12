@@ -1,41 +1,49 @@
+import secrets
+import logging
+
 from django.conf import settings
-from clubs.models import Club
-from clubs.serializers import ClubSerializer
+from django.core.paginator import Paginator
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+from datetime import timedelta
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
-from django.utils import timezone
-from django.db.models import Sum, Count, Q
-from django_ratelimit.decorators import ratelimit
-from django.utils.decorators import method_decorator
-from datetime import timedelta
-import random
-import logging
+
+from clubs.models import Club
+from clubs.serializers import ClubSerializer
+from bookings.models import Booking
+from bookings.tasks import send_otp_sms_task, send_welcome_email_task
 
 from .models import OTP
 from .serializers import (
     UserSerializer,
-    UserRegistrationSerializer, 
+    UserRegistrationSerializer,
     UserUpdateSerializer,
-    OTPSerializer, 
     OTPVerifySerializer,
-    ChangePasswordSerializer
+    ChangePasswordSerializer,
 )
-from bookings.tasks import send_otp_sms_task, send_welcome_email_task
-from bookings.models import Booking
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
-# Create your views here.
+
+def generate_otp_code():
+    """Cryptographically-secure 6-digit OTP (not random.randint)."""
+    return str(secrets.randbelow(900000) + 100000)
+
 
 class SendOTPView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         mobile_number = request.data.get('mobile_number', '').strip()
@@ -46,194 +54,189 @@ class SendOTPView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Generate OTP
-        import random
-        otp_code = str(random.randint(100000, 999999))
+        otp_code = generate_otp_code()
 
-        # Use select_for_update to prevent race condition with concurrent users
-        from django.db import transaction
         with transaction.atomic():
-            # Delete any existing OTP for this number
             OTP.objects.filter(mobile_number=mobile_number).delete()
-            # Create new OTP
-            otp_obj = OTP.objects.create(
+            OTP.objects.create(
                 mobile_number=mobile_number,
                 otp=otp_code,
-                expires_at=timezone.now() + timedelta(minutes=10)
+                expires_at=timezone.now() + timedelta(minutes=10),
+                ip_address=request.META.get('REMOTE_ADDR'),
             )
 
-        # Try sending SMS via Twilio
-        sms_sent = False
-        if all([settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN, settings.TWILIO_PHONE_NUMBER]):
-            try:
-                from twilio.rest import Client
-                client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-                client.messages.create(
-                    body=f'Your Sports Club OTP is: {otp_code}. Valid for 10 minutes.',
-                    from_=settings.TWILIO_PHONE_NUMBER,
-                    to=f'+91{mobile_number}'
-                )
-                sms_sent = True
-            except Exception as e:
-                print(f"Twilio SMS failed: {e}")
+        # Always send asynchronously via Celery — never block the request
+        # thread on a Twilio round-trip.
+        send_otp_sms_task.delay(mobile_number, otp_code)
 
-        print(f"OTP for {mobile_number}: {otp_code}")  # Always log to console
+        logger.info(f"OTP requested for {mobile_number}")
 
         response_data = {
-            'message': 'OTP sent successfully' if sms_sent else 'OTP generated',
+            'message': 'OTP sent successfully',
             'mobile_number': mobile_number,
             'expires_in': 600,
         }
 
-        # Return OTP in response if SMS not sent (dev mode)
-        if not sms_sent:
+        # NEVER return the raw OTP outside local development. Doing this in
+        # production means anyone can "verify" without ever receiving an SMS.
+        if settings.DEBUG:
             response_data['otp'] = otp_code
 
         return Response(response_data, status=status.HTTP_200_OK)
-        
+
 
 class VerifyOTPView(APIView):
     # Verify OTP and return JWT token if user exists
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = OTPVerifySerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         mobile_number = serializer.validated_data['mobile_number']
         otp_code = serializer.validated_data['otp']
 
-        try:
-            otp = OTP.objects.get(
-                mobile_number=mobile_number,
-                otp=otp_code,
-                #valid_duration = timedelta(minutes=5),
-                is_verified=False
-            )
-            
-            logger.warning(f"Found OTP: {otp.otp}, Expires At: {otp.expires_at}, Now: {timezone.now()}")
+        otp = OTP.objects.filter(
+            mobile_number=mobile_number,
+            is_verified=False,
+        ).order_by('-created_at').first()
 
-
-            if otp.is_expired:
-                otp.delete()
-                return Response({
-                    'error' : 'OTP has expired. Please request a new one.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            otp.is_verified = True
-            otp.save()
-
-            # Check if user already exists
-            try:
-                user = User.objects.get(mobile_number=mobile_number)
-                user.is_mobile_verified = True
-                user.save()
-                
-                # Generate JWT tokens
-                refresh = RefreshToken.for_user(user)
-
-                logger.info(f"User {user.username} logged in via OTP")
-                
-                return Response({
-                    'message': 'OTP verified successfully',
-                    'user_exists': True,
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh),
-                    'user': UserSerializer(user).data
-                }, status=status.HTTP_200_OK)
-            
-            except User.DoesNotExist:
-                logger.info(f"OTP verified for new user: {mobile_number}")
-                return Response({
-                    'message': 'OTP verified successfully. Please complete registration.',
-                    'user_exists': False,
-                    'mobile_number': mobile_number
-                }, status=status.HTTP_200_OK)
-                
-        except OTP.DoesNotExist:
+        if otp is None:
             return Response({
                 'error': 'Invalid OTP. Please check and try again.'
             }, status=status.HTTP_400_BAD_REQUEST)
-    
+
+        if otp.is_expired:
+            otp.delete()
+            return Response({
+                'error': 'OTP has expired. Please request a new one.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp.attempts >= OTP.MAX_ATTEMPTS:
+            return Response({
+                'error': 'Too many incorrect attempts. Please request a new OTP.'
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        if otp.otp != otp_code:
+            otp.register_failed_attempt()
+            remaining = max(OTP.MAX_ATTEMPTS - otp.attempts, 0)
+            return Response({
+                'error': f'Invalid OTP. {remaining} attempt(s) remaining.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        otp.is_verified = True
+        otp.save(update_fields=['is_verified'])
+
+        try:
+            user = User.objects.get(mobile_number=mobile_number)
+            user.is_mobile_verified = True
+            user.save(update_fields=['is_mobile_verified'])
+
+            refresh = RefreshToken.for_user(user)
+            logger.info(f"User {user.username} logged in via OTP")
+
+            return Response({
+                'message': 'OTP verified successfully',
+                'user_exists': True,
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            logger.info(f"OTP verified for new user: {mobile_number}")
+            return Response({
+                'message': 'OTP verified successfully. Please complete registration.',
+                'user_exists': False,
+                'mobile_number': mobile_number
+            }, status=status.HTTP_200_OK)
+
+
 class RegisterView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = UserRegistrationSerializer(data=request.data)
-        if serializer.is_valid():
-            try:
-                user = serializer.save()
-                # Always return JWT tokens after registration
-                from rest_framework_simplejwt.tokens import RefreshToken
-                refresh = RefreshToken.for_user(user)
-                return Response({
-                    'message': 'Registration successful',
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh),
-                    'user': {
-                        'id': user.id,
-                        'username': user.username,
-                        'email': user.email,
-                        'first_name': user.first_name,
-                        'last_name': user.last_name,
-                        'mobile_number': str(user.mobile_number),
-                        'is_staff': user.is_staff,
-                    }
-                }, status=status.HTTP_201_CREATED)
-            except Exception as e:
-                return Response(
-                    {'error': str(e)},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = serializer.save()
+        except IntegrityError:
+            logger.warning("Registration IntegrityError — likely a duplicate race", exc_info=True)
+            return Response(
+                {'error': 'An account with these details already exists.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        send_welcome_email_task.delay(user.id)
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'message': 'Registration successful',
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'mobile_number': str(user.mobile_number),
+                'is_staff': user.is_staff,
+            }
+        }, status=status.HTTP_201_CREATED)
+
 
 class UserProfileView(APIView):
     # Get and update user profile
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
-        # Get user profile
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
-    
+
     def put(self, request):
-        # Update user profile (full update)
         serializer = UserUpdateSerializer(request.user, data=request.data)
         if serializer.is_valid():
             serializer.save()
             logger.info(f"User {request.user.username} updated profile")
             return Response(UserSerializer(request.user).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     def patch(self, request):
-        # Update user profile (partial update)
         serializer = UserUpdateSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             logger.info(f"User {request.user.username} updated profile")
             return Response(UserSerializer(request.user).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
+
 class ChangePasswordView(APIView):
     # Change user password
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth'
 
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         user = request.user
 
-        # check old password
         if not user.check_password(serializer.validated_data['old_password']):
             return Response({
                 'error': 'Old password is incorrect'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Set new password
+
         user.set_password(serializer.validated_data['new_password'])
         user.save()
 
@@ -242,9 +245,11 @@ class ChangePasswordView(APIView):
         return Response({
             'message': 'Password changed successfully'
         })
-    
 
-# Admin Views
+
+# ---------------------------------------------------------------------------
+# Admin views
+# ---------------------------------------------------------------------------
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
@@ -252,12 +257,8 @@ def dashboard_stats(request):
     from bookings.models import Booking
     from payments.models import Payment
     from clubs.models import Club, Sport
-    from django.contrib.auth import get_user_model
     from django.db.models import Sum
-    from django.utils import timezone
-    from datetime import timedelta
 
-    User = get_user_model()
     today = timezone.now().date()
 
     total_bookings = Booking.objects.count()
@@ -278,7 +279,6 @@ def dashboard_stats(request):
 
     recent_activities = []
 
-    # Recent bookings
     for b in Booking.objects.select_related('user', 'club', 'sport').order_by('-updated_at')[:15]:
         if b.status == 'confirmed':
             msg = f"{b.user.get_full_name() or b.user.username} booked {b.sport.name} at {b.club.name}"
@@ -296,25 +296,29 @@ def dashboard_stats(request):
             continue
         delta = timezone.now() - b.updated_at
         ts = b.updated_at.strftime('%d %b, %I:%M %p')
-        if delta.total_seconds() < 60: ts = "Just now"
-        elif delta.total_seconds() < 3600: ts = f"{int(delta.total_seconds()//60)}m ago"
-        elif delta.days == 0: ts = f"{int(delta.total_seconds()//3600)}h ago"
+        if delta.total_seconds() < 60:
+            ts = "Just now"
+        elif delta.total_seconds() < 3600:
+            ts = f"{int(delta.total_seconds()//60)}m ago"
+        elif delta.days == 0:
+            ts = f"{int(delta.total_seconds()//3600)}h ago"
         recent_activities.append({'type': atype, 'message': msg, 'time': ts,
             'amount': float(b.amount) if b.status in ['confirmed', 'refunded'] else None,
             'sort_key': b.updated_at.timestamp()})
 
-    # Recent clubs added
     for club in Club.objects.order_by('-created_at')[:5]:
         delta = timezone.now() - club.created_at
         ts = club.created_at.strftime('%d %b, %I:%M %p')
-        if delta.total_seconds() < 60: ts = "Just now"
-        elif delta.total_seconds() < 3600: ts = f"{int(delta.total_seconds()//60)}m ago"
-        elif delta.days == 0: ts = f"{int(delta.total_seconds()//3600)}h ago"
+        if delta.total_seconds() < 60:
+            ts = "Just now"
+        elif delta.total_seconds() < 3600:
+            ts = f"{int(delta.total_seconds()//60)}m ago"
+        elif delta.days == 0:
+            ts = f"{int(delta.total_seconds()//3600)}h ago"
         recent_activities.append({'type': 'club_added',
             'message': f"New club added: {club.name} — {club.location}",
             'time': ts, 'amount': None, 'sort_key': club.created_at.timestamp()})
 
-    # Recent sports added
     for sport in Sport.objects.select_related('club').order_by('-id')[:5]:
         recent_activities.append({'type': 'sport_added',
             'message': f"Sport added: {sport.name} at {sport.club.name} (₹{sport.price_per_hour}/hr)",
@@ -340,13 +344,16 @@ def monthly_report(request):
     from payments.models import Payment
     from clubs.models import Club
     from django.db.models import Sum
-    from django.utils import timezone
-    from datetime import timedelta, date
+    from datetime import date
     from calendar import monthrange
 
     today = timezone.now().date()
-    month = int(request.query_params.get('month', today.month))
-    year = int(request.query_params.get('year', today.year))
+    try:
+        month = int(request.query_params.get('month', today.month))
+        year = int(request.query_params.get('year', today.year))
+    except ValueError:
+        return Response({'error': 'month and year must be integers'}, status=status.HTTP_400_BAD_REQUEST)
+
     _, last_day = monthrange(year, month)
     start_date = date(year, month, 1)
     end_date = date(year, month, last_day)
@@ -407,10 +414,11 @@ def monthly_report(request):
         'club_breakdown': club_breakdown, 'daily_data': daily_data,
     })
 
+
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def all_bookings(request):
-    """Admin: list all bookings with payment method included"""
+    """Admin: list all bookings with payment method included (paginated)"""
     from bookings.models import Booking
     from payments.models import Payment
 
@@ -418,15 +426,19 @@ def all_bookings(request):
         'user', 'club', 'sport', 'payment'
     ).order_by('-created_at')
 
-    # Build payment_method lookup map for efficiency
+    page_size = min(int(request.query_params.get('page_size', 50)), 200)
+    page_number = int(request.query_params.get('page', 1))
+    paginator = Paginator(bookings, page_size)
+    page = paginator.get_page(page_number)
+
     payment_map = {
         p.booking_id: p.payment_method
-        for p in Payment.objects.all().values_list('booking_id', 'payment_method', named=True)
+        for p in Payment.objects.filter(booking__in=page.object_list).values_list(
+            'booking_id', 'payment_method', named=True)
     }
 
     data = []
-    for b in bookings:
-        # Get payment method: try related object first, then map, then default
+    for b in page.object_list:
         method = ''
         try:
             method = (b.payment.payment_method or '').strip()
@@ -435,7 +447,7 @@ def all_bookings(request):
         if not method:
             method = (payment_map.get(b.id) or '').strip()
         if not method and b.status in ('confirmed', 'refunded'):
-            method = 'card'  # default for old bookings before payment mode was tracked
+            method = 'card'
 
         data.append({
             'id': str(b.id),
@@ -452,53 +464,64 @@ def all_bookings(request):
             'created_at': b.created_at.isoformat(),
         })
 
-    return Response(data)
+    return Response({
+        'count': paginator.count,
+        'num_pages': paginator.num_pages,
+        'page': page.number,
+        'results': data,
+    })
+
 
 @api_view(['PATCH'])
 @permission_classes([IsAdminUser])
 def update_booking_status(request, booking_id):
     """Update booking status by admin"""
     from bookings.tasks import send_booking_status_update
-    
+
     try:
         booking = Booking.objects.get(id=booking_id)
         new_status = request.data.get('status')
-        
+
         if new_status not in ['pending', 'confirmed', 'cancelled', 'completed']:
             return Response(
                 {'error': 'Invalid status. Must be: pending, confirmed, cancelled or completed'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         old_status = booking.status
         booking.status = new_status
         booking.save()
-        
-        # Send notification(async)
+
         if old_status != new_status:
             send_booking_status_update.delay(booking.id, new_status)
-        
+
         logger.info(f"Admin updated booking {booking_id} status: {old_status} -> {new_status}")
 
         return Response({
             'message': 'Status updated successfully',
-            'booking_id' : booking.id,
-            'old_status' : old_status, 
+            'booking_id': booking.id,
+            'old_status': old_status,
             'new_status': new_status
         })
-        
+
     except Booking.DoesNotExist:
         return Response(
             {'error': 'Booking not found'},
             status=status.HTTP_404_NOT_FOUND
         )
 
+
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def all_users(request):
-    """Get all users for admin"""
+    """Get all users for admin (paginated)"""
     users = User.objects.all().order_by('-date_joined')
-    
+
+    page_size = min(int(request.query_params.get('page_size', 50)), 200)
+    page_number = int(request.query_params.get('page', 1))
+    paginator = Paginator(users, page_size)
+    page = paginator.get_page(page_number)
+
     data = [{
         'id': u.id,
         'username': u.username,
@@ -512,147 +535,142 @@ def all_users(request):
         'is_mobile_verified': u.is_mobile_verified,
         'date_joined': u.date_joined,
         'total_bookings': u.bookings.count()
-    } for u in users]
-    
-    return Response(data)
+    } for u in page.object_list]
+
+    return Response({
+        'count': paginator.count,
+        'num_pages': paginator.num_pages,
+        'page': page.number,
+        'results': data,
+    })
+
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAdminUser])
 def admin_clubs(request):
     """Admin: list all clubs or create a new one"""
-    from clubs.models import Club
-    from clubs.serializers import ClubSerializer
- 
     if request.method == 'GET':
         clubs = Club.objects.all()
         serializer = ClubSerializer(clubs, many=True)
         return Response(serializer.data)
- 
-    elif request.method == 'POST':
-        serializer = ClubSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
- 
- 
+
+    serializer = ClubSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAdminUser])
 def admin_club_detail(request, club_id):
     """Admin: retrieve, update, or delete a specific club"""
-    from clubs.models import Club
-    from clubs.serializers import ClubSerializer
- 
     try:
         club = Club.objects.get(id=club_id)
     except Club.DoesNotExist:
         return Response({'error': 'Club not found'}, status=status.HTTP_404_NOT_FOUND)
- 
+
     if request.method == 'GET':
         serializer = ClubSerializer(club)
         return Response(serializer.data)
- 
-    elif request.method in ['PUT', 'PATCH']:
+
+    if request.method in ['PUT', 'PATCH']:
         partial = request.method == 'PATCH'
         serializer = ClubSerializer(club, data=request.data, partial=partial)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
- 
-    elif request.method == 'DELETE':
-        club.delete()
-        return Response({'message': 'Club deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 
-@csrf_exempt
-def create_admin(request):
-    if request.GET.get('key') != 'setup2026':
-        return JsonResponse({'error': 'forbidden'}, status=403)
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
-    if not User.objects.filter(username='admin').exists():
-        User.objects.create_superuser(
-            username='admin',
-            email='admin@sportsclub.com',
-            password='Admin@123',
-            mobile_number='9000000000',
-            is_mobile_verified=True
+    club.delete()
+    return Response({'message': 'Club deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+
+
+def _admin_login(request):
+    """Admin login using mobile number + admin passcode or Django password."""
+
+    mobile = request.data.get("mobile_number", "").strip()
+    passcode = request.data.get("passcode", "").strip()
+    password = request.data.get("password", "")
+
+    if not mobile or not (passcode or password):
+        return Response(
+            {"error": "Mobile number and passcode/password required"},
+            status=status.HTTP_400_BAD_REQUEST,
         )
-        return JsonResponse({'message': 'Admin created!'})
-    return JsonResponse({'message': 'Already exists'})
-    
-@csrf_exempt
-def reset_admin(request):
-    if request.GET.get('key') != 'setup2026':
-        return JsonResponse({'error': 'forbidden'}, status=403)
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
-    try:
-        user = User.objects.get(username='admin')
-        user.set_password('Admin@123')
-        user.is_staff = True
-        user.is_superuser = True
-        user.save()
-        return JsonResponse({'message': f'Password reset for {user.username}'})
-    except User.DoesNotExist:
-        return JsonResponse({'error': 'Admin not found'})
 
-@csrf_exempt
-def flush_and_setup(request):
-    if request.GET.get('key') != 'setup2026':
-        return JsonResponse({'error': 'forbidden'}, status=403)
-    from django.core.management import call_command
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
-    # Clear all data
-    call_command('flush', '--no-input')
-    # Recreate superuser
-    User.objects.create_superuser(
-        username='admin',
-        email='admin@sportsclub.com',
-        password='Admin@123',
-        mobile_number='9000000000',
-        is_mobile_verified=True
-    )
-    return JsonResponse({'message': 'Database flushed and admin created!'})
+    generic_error = {
+        "error": "Invalid mobile number or passcode/password"
+    }
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def admin_login(request):
-    """Direct admin login with mobile + passcode — no OTP needed"""
-    from django.contrib.auth import get_user_model
-    from rest_framework_simplejwt.tokens import RefreshToken
- 
-    mobile = request.data.get('mobile_number', '').strip()
-    passcode = request.data.get('passcode', '').strip()
-    
-    # Verify passcode matches server-side secret
-    ADMIN_PASSCODE = 'Admin@2026'  # Keep in sync with frontend
-    
-    if not mobile or not passcode:
-        return Response({'error': 'Mobile number and passcode required'}, 
-                       status=status.HTTP_400_BAD_REQUEST)
-    
-    if passcode != ADMIN_PASSCODE:
-        return Response({'error': 'Invalid passcode'}, 
-                       status=status.HTTP_401_UNAUTHORIZED)
-    
-    User = get_user_model()
     try:
-        user = User.objects.get(mobile_number=mobile, is_staff=True)
+        user = User.objects.get(
+            mobile_number=mobile,
+            is_staff=True,
+            is_active=True,
+        )
     except User.DoesNotExist:
-        return Response({'error': 'No admin account found for this mobile number'}, 
-                       status=status.HTTP_404_NOT_FOUND)
-    
+        logger.warning(
+            "Failed admin login attempt for mobile %s",
+            mobile,
+        )
+        return Response(
+            generic_error,
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if passcode:
+        admin_passcode = getattr(settings, 'ADMIN_PASSCODE', '')
+        if not admin_passcode or passcode != admin_passcode:
+            logger.warning(
+                "Failed admin login attempt for mobile %s",
+                mobile,
+            )
+            return Response(
+                generic_error,
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+    else:
+        if not user.check_password(password):
+            logger.warning(
+                "Failed admin login attempt for mobile %s",
+                mobile,
+            )
+            return Response(
+                generic_error,
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
     refresh = RefreshToken.for_user(user)
-    return Response({
-        'access': str(refresh.access_token),
-        'refresh': str(refresh),
-        'user': {
-            'id': user.id,
-            'username': user.username,
-            'is_staff': user.is_staff,
-        }
-    }, status=status.HTTP_200_OK)
+
+    logger.info(
+        "Admin %s logged in successfully",
+        user.username,
+    )
+
+    return Response(
+        {
+            "message": "Admin login successful",
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "mobile_number": user.mobile_number,
+                "is_staff": user.is_staff,
+                "is_superuser": user.is_superuser,
+            },
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+# throttle_scope must be set on the plain function BEFORE api_view() wraps
+# it into a view class — that's how ScopedRateThrottle picks it up for
+# function-based views.
+_admin_login.throttle_scope = 'auth'
+admin_login = api_view(['POST'])(
+    permission_classes([AllowAny])(
+        throttle_classes([ScopedRateThrottle])(_admin_login)
+    )
+)

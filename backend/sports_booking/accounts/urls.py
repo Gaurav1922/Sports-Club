@@ -1,22 +1,25 @@
 from django.urls import path
 from . import views
-from .views import create_admin, reset_admin, flush_and_setup
 from django.http import JsonResponse
 from django.utils import timezone
+
 
 def health_check(request):
     """Lightweight health check — keeps server warm"""
     return JsonResponse({'status': 'ok', 'time': str(timezone.now())})
 
+
 urlpatterns = [
     # Health check — used by UptimeRobot / keep-alive pings
     path('health/', health_check, name='health_check'),
 
-    path('setup/', create_admin, name='create_admin'),
-    path('reset-admin/', reset_admin, name='reset_admin'),
-    path('flush-setup/', flush_and_setup, name='flush_and_setup'),
-
-
+    # NOTE: the old setup/, reset-admin/, and flush-setup/ endpoints have
+    # been removed — they allowed anyone with the (publicly-visible) key to
+    # wipe the production database and create/reset a superuser with no
+    # authentication. Use `python manage.py create_admin` instead (run it
+    # from Render's shell, or as a one-off release command), with
+    # ADMIN_USERNAME / ADMIN_PASSWORD / ADMIN_EMAIL / ADMIN_MOBILE set as
+    # env vars.
 
     # Authentication endpoints
     path('send-otp/', views.SendOTPView.as_view(), name='send_otp'),

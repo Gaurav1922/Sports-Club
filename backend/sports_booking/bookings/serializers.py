@@ -24,27 +24,25 @@ class BookingSerializer(serializers.ModelSerializer):
         return obj.user.get_full_name() or obj.user.username
 
     def get_payment_method(self, obj):
-        """Return payment method from related payment record"""
+        """
+        Reads the payment method off the already-fetched `payment` relation.
+        The view MUST select_related('payment') so this never issues its own query.
+        Falls back to a direct query only if the relation wasn't preloaded
+        (e.g. this serializer is reused somewhere without select_related).
+        """
         try:
-            from payments.models import Payment as PaymentModel
-            p = PaymentModel.objects.filter(
-                booking=obj, status='completed'
-            ).values('payment_method').first()
-            if p:
-                method = (p['payment_method'] or '').strip()
-                return method if method else 'card'
-        except Exception:
-            pass
-        # Also check confirmed status (some may be confirmed without completed payment in dev)
-        try:
-            from payments.models import Payment as PaymentModel
-            p = PaymentModel.objects.filter(booking=obj).values('payment_method', 'status').first()
-            if p:
-                method = (p['payment_method'] or '').strip()
-                return method if method else 'card'
-        except Exception:
-            pass
-        return None
+            payment = obj.payment
+        except Booking.payment.RelatedObjectDoesNotExist:
+            return None
+        except AttributeError:
+            # payment relation wasn't select_related'd — fall back safely
+            payment = obj.__class__.objects.filter(pk=obj.pk).values(
+                'payment__payment_method'
+            ).first()
+            return (payment or {}).get('payment__payment_method') or None
+
+        method = (payment.payment_method or '').strip()
+        return method if method else 'card'
 
 
 class SlotLockSerializer(serializers.ModelSerializer):

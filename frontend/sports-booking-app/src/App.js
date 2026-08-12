@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Calendar, Clock, MapPin, User, LogOut, CreditCard, Search, Menu, X, Star, Users, TrendingUp, DollarSign, Plus, Edit, Trash2, Lock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+
+// Loaded once, outside the component tree, per Stripe's own guidance —
+// re-creating this on every render breaks Elements' internal state.
+const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || '');
 
 const api = {
   sendOTP: (mobile) => fetch(`${API_BASE_URL}/auth/send-otp/`, {
@@ -187,205 +193,101 @@ const api = {
 };
 
 // Multi-mode Payment Form
-const StripePaymentForm = ({ amount, onSuccess, onCancel }) => {
-  const [paymentMode, setPaymentMode] = useState('card');
-  const [cardNumber, setCardNumber] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [cvc, setCvc] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [upiId, setUpiId] = useState('');
-  const [netbankingBank, setNetbankingBank] = useState('');
-  const [selectedWallet, setSelectedWallet] = useState('');
+const CARD_ELEMENT_OPTIONS = {
+  style: {
+    base: {
+      fontSize: '15px',
+      color: '#1f2937',
+      '::placeholder': { color: '#9ca3af' },
+    },
+    invalid: { color: '#dc2626' },
+  },
+};
+
+/**
+ * Real Stripe Elements integration. Replaces the previous fake form that
+ * collected raw card numbers into React state and faked success after a
+ * setTimeout — no card data ever touches this app's own code or servers
+ * now; Stripe's iframe (CardElement) owns it entirely, and the flow always
+ * goes through a real PaymentIntent created server-side.
+ *
+ * Requires `createPaymentIntentFn` (token, bookingId) => Promise<{client_secret}>
+ * to have already been fixed on the backend to stop returning a fake
+ * dev secret in production (see payments/views.py).
+ */
+const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
+  const stripe = useStripe();
+  const elements = useElements();
   const [processing, setProcessing] = useState(false);
   const [formError, setFormError] = useState('');
+  const [cardName, setCardName] = useState('');
 
-  const formatCardNumber = (val) => val.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
-  const formatExpiry = (val) => {
-    const d = val.replace(/\D/g, '').slice(0, 4);
-    if (d.length === 0) return '';
-    let month = d.slice(0, 2);
-    if (month.length === 2 && parseInt(month) > 12) month = '12';
-    if (month.length === 2 && parseInt(month) < 1) month = '01';
-    return d.length >= 3 ? month + '/' + d.slice(2) : month;
-  };
-
-  const handleSubmit = () => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     setFormError('');
-    if (paymentMode === 'card') {
-      if (cardNumber.replace(/\s/g, '').length !== 16) { setFormError('Enter a valid 16-digit card number.'); return; }
-      if (!/^\d{2}\/\d{2}$/.test(expiry)) { setFormError('Enter expiry in MM/YY format.'); return; }
-      const [mm, yy] = expiry.split('/');
-      const month = parseInt(mm), year = parseInt('20' + yy);
-      const now = new Date();
-      if (month < 1 || month > 12) { setFormError('Month must be between 01 and 12.'); return; }
-      if (year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth() + 1)) {
-        setFormError('Card has expired. Please use a valid card.'); return;
-      }
-      if (cvc.length < 3) { setFormError('Enter a valid 3-digit CVC.'); return; }
-      if (!cardName.trim()) { setFormError('Enter cardholder name.'); return; }
-    } else if (paymentMode === 'upi') {
-      if (!upiId.includes('@')) { setFormError('Enter a valid UPI ID (e.g. name@upi).'); return; }
-    } else if (paymentMode === 'netbanking') {
-      if (!netbankingBank) { setFormError('Please select your bank.'); return; }
-    } else if (paymentMode === 'wallet') {
-      if (!selectedWallet) { setFormError('Please select a wallet to continue.'); return; }
+
+    if (!stripe || !elements || !clientSecret) {
+      setFormError('Payment is still initializing — please wait a moment and try again.');
+      return;
     }
+    if (!cardName.trim()) {
+      setFormError('Enter the cardholder name.');
+      return;
+    }
+
     setProcessing(true);
-    setTimeout(() => {
-      onSuccess({ paymentIntentId: 'pi_' + Math.random().toString(36).substr(2, 9), mode: paymentMode });
-      setProcessing(false);
-    }, 1500);
+    const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+      payment_method: {
+        card: elements.getElement(CardElement),
+        billing_details: { name: cardName.trim() },
+      },
+    });
+
+    setProcessing(false);
+
+    if (error) {
+      setFormError(error.message || 'Payment failed. Please check your card details.');
+      return;
+    }
+    if (paymentIntent && paymentIntent.status === 'succeeded') {
+      onSuccess({ paymentIntentId: paymentIntent.id, mode: 'card' });
+    } else {
+      setFormError(`Payment status: ${paymentIntent?.status || 'unknown'}. Please try again.`);
+    }
   };
-
-  const modes = [
-    { id: 'card', label: '💳 Card', desc: 'Credit / Debit Card' },
-    { id: 'upi', label: '📱 UPI', desc: 'GPay, PhonePe, Paytm' },
-    { id: 'netbanking', label: '🏦 Net Banking', desc: 'All major banks' },
-    { id: 'wallet', label: '👛 Wallet', desc: 'Paytm, Amazon Pay' },
-  ];
-
-  const banks = ['State Bank of India', 'HDFC Bank', 'ICICI Bank', 'Axis Bank', 'Kotak Mahindra', 'Punjab National Bank', 'Bank of Baroda', 'Canara Bank'];
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-lg max-h-screen overflow-y-auto">
+    <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow-lg max-h-screen overflow-y-auto">
       <h3 className="text-xl font-bold mb-1">Complete Payment</h3>
       <p className="text-3xl font-bold text-indigo-600 mb-4">₹{amount}</p>
 
-      {/* Payment Mode Selector */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
-        {modes.map(m => (
-          <button
-            key={m.id}
-            onClick={() => { setPaymentMode(m.id); setFormError(''); setSelectedWallet(''); }}
-            className={`p-2 rounded-lg border text-center transition ${paymentMode === m.id ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'}`}
-          >
-            <div className="text-lg">{m.label.split(' ')[0]}</div>
-            <div className="text-xs font-medium text-gray-700 mt-0.5">{m.label.split(' ').slice(1).join(' ')}</div>
-            <div className="text-xs text-gray-400 hidden sm:block">{m.desc}</div>
-          </button>
-        ))}
-      </div>
-
       {formError && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm mb-3">{formError}</div>}
 
-      {/* Card Form */}
-      {paymentMode === 'card' && (
-        <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium mb-1">Card Number</label>
-            <input type="text" value={cardNumber} onChange={e => setCardNumber(formatCardNumber(e.target.value))}
-              placeholder="4242 4242 4242 4242" className="w-full px-3 py-2 border rounded-lg text-sm" maxLength="19" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Cardholder Name</label>
-            <input type="text" value={cardName} onChange={e => setCardName(e.target.value)}
-              placeholder="Name on card" className="w-full px-3 py-2 border rounded-lg text-sm" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium mb-1">Expiry</label>
-              <input type="text" value={expiry} onChange={e => setExpiry(formatExpiry(e.target.value))}
-                placeholder="MM/YY" className="w-full px-3 py-2 border rounded-lg text-sm" maxLength="5" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">CVC</label>
-              <input type="text" value={cvc} onChange={e => setCvc(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                placeholder="123" className="w-full px-3 py-2 border rounded-lg text-sm" maxLength="3" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* UPI Form */}
-      {paymentMode === 'upi' && (
-        <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium mb-1">UPI ID</label>
-            <input type="text" value={upiId} onChange={e => setUpiId(e.target.value)}
-              placeholder="yourname@okaxis" className="w-full px-3 py-2 border rounded-lg text-sm" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-2">Select your UPI app — enter your registered UPI ID above</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { name: 'GPay', suffix: '@okicici', icon: '🟢' },
-                { name: 'PhonePe', suffix: '@ybl', icon: '🟣' },
-                { name: 'Paytm', suffix: '@paytm', icon: '🔵' },
-                { name: 'BHIM', suffix: '@upi', icon: '🟠' },
-                { name: 'Amazon Pay', suffix: '@apl', icon: '🟡' },
-                { name: 'Cred', suffix: '@cred', icon: '⚫' },
-              ].map(app => (
-                <button key={app.name}
-                  onClick={() => {
-                    const username = upiId.includes('@') ? upiId.split('@')[0] : upiId;
-                    if (username) setUpiId(username + app.suffix);
-                    else setFormError(`Enter your username before selecting ${app.name}`);
-                  }}
-                  className={`p-2 border rounded-lg text-xs text-gray-600 hover:border-indigo-400 hover:bg-indigo-50 text-center ${upiId.includes(app.suffix) ? 'border-indigo-500 bg-indigo-50 font-semibold' : ''}`}>
-                  <div>{app.icon}</div>
-                  <div>{app.name}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
-            <p className="text-xs text-blue-700">
-              💡 <strong>How to pay:</strong> Enter your UPI ID (e.g. <code>yourname@okicici</code>) or type your name and select your app to auto-fill the UPI suffix. Then click Pay.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Net Banking Form */}
-      {paymentMode === 'netbanking' && (
+      <div className="space-y-3">
         <div>
-          <label className="block text-sm font-medium mb-2">Select Bank</label>
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {banks.map(bank => (
-              <label key={bank} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer ${netbankingBank === bank ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                <input type="radio" name="bank" value={bank} checked={netbankingBank === bank}
-                  onChange={() => setNetbankingBank(bank)} className="text-indigo-600" />
-                <span className="text-sm text-gray-700">{bank}</span>
-              </label>
-            ))}
-          </div>
+          <label className="block text-sm font-medium mb-1">Cardholder Name</label>
+          <input type="text" value={cardName} onChange={e => setCardName(e.target.value)}
+            placeholder="Name on card" className="w-full px-3 py-2 border rounded-lg text-sm" />
         </div>
-      )}
-
-      {/* Wallet Form */}
-      {paymentMode === 'wallet' && (
         <div>
-          <label className="block text-sm font-medium mb-2">Select Wallet</label>
-          <div className="grid grid-cols-2 gap-2">
-            {['Paytm Wallet', 'Amazon Pay', 'Mobikwik', 'Freecharge', 'Airtel Money', 'Jio Money'].map(w => (
-              <button key={w}
-                onClick={() => { setSelectedWallet(w); setFormError(''); }}
-                className={`p-3 border rounded-lg text-sm text-left transition ${
-                  selectedWallet === w
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-semibold'
-                    : 'border-gray-200 text-gray-700 hover:border-indigo-400 hover:bg-indigo-50'
-                }`}>
-                {selectedWallet === w ? '✓ ' : ''}{w}
-              </button>
-            ))}
+          <label className="block text-sm font-medium mb-1">Card Details</label>
+          <div className="w-full px-3 py-3 border rounded-lg">
+            <CardElement options={CARD_ELEMENT_OPTIONS} />
           </div>
-          {selectedWallet && (
-            <p className="text-xs text-green-600 mt-2">✓ {selectedWallet} selected — click Pay to continue</p>
-          )}
         </div>
-      )}
+      </div>
 
       <div className="flex gap-3 mt-5">
-        <button onClick={handleSubmit} disabled={processing}
+        <button type="submit" disabled={processing || !stripe}
           className="flex-1 bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 font-semibold">
           {processing ? 'Processing...' : `Pay ₹${amount}`}
         </button>
-        <button onClick={onCancel} className="px-5 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">
+        <button type="button" onClick={onCancel} className="px-5 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">
           Cancel
         </button>
       </div>
-      <p className="text-xs text-gray-400 mt-3 text-center">🔒 256-bit SSL encrypted · Your payment info is secure</p>
-    </div>
+      <p className="text-xs text-gray-400 mt-3 text-center">🔒 Payments are processed securely by Stripe — your card details never touch our servers.</p>
+    </form>
   );
 };
 
@@ -450,8 +352,12 @@ function App() {
   const [isVerified, setIsVerified] = useState(false);
   const [devOtp, setDevOtp] = useState(null);
   const [adminPasscode, setAdminPasscode] = useState('');
+  // Was: const ADMIN_PASSCODE = 'Admin@2026'; — a real secret hardcoded
+  // directly in the JS bundle, readable by anyone via view-source or
+  // devtools regardless of minification. The passcode must be verified
+  // ONLY by the backend (api.adminLogin below) — removed the client-side
+  // comparison entirely rather than just relocating the secret.
   const [showAdminLogin, setShowAdminLogin] = useState(false);
-  const ADMIN_PASSCODE = 'Admin@2026';
 
   const [regData, setRegData] = useState({
     username: '',
@@ -471,6 +377,8 @@ function App() {
   const [lockedSlot, setLockedSlot] = useState(null);
   const [showPayment, setShowPayment] = useState(false);
   const [pendingBooking, setPendingBooking] = useState(null);
+  const [paymentClientSecret, setPaymentClientSecret] = useState(null);
+  const [paymentIntentError, setPaymentIntentError] = useState('');
   const [bookingConfirmation, setBookingConfirmation] = useState(null); // holds confirmed booking details
   const [waitlistedSlots, setWaitlistedSlots] = useState([]);
   const [showWaitlistNotification, setShowWaitlistNotification] = useState(false);
@@ -579,7 +487,6 @@ function App() {
     setError('');
     if (!mobile || mobile.length !== 10) { setError('Enter a valid 10-digit mobile number'); return; }
     if (!adminPasscode) { setError('Enter the admin passcode'); return; }
-    if (adminPasscode !== ADMIN_PASSCODE) { setError('Invalid passcode'); return; }
     setLoading(true);
     try {
       // Direct admin login — no OTP needed
@@ -705,21 +612,16 @@ function App() {
           setSuccess('Registration successful!');
           await loadUserDataWithToken(accessToken);
         } else {
-          // No token returned — auto login via OTP verify
-          setSuccess('Registration successful! Logging you in...');
-          const loginResponse = await api.verifyOTP(regData.mobile_number, '000000');
-          const loginData = await loginResponse.json();
-          if (loginData.access) {
-            localStorage.setItem('token', loginData.access);
-            setToken(loginData.access);
-            await loadUserDataWithToken(loginData.access);
-          } else {
-            // Fallback — ask user to login again
-            setSuccess('Registration successful! Please login with your mobile number.');
-            setCurrentView('login');
-            setOtpSent(false);
-            setMobile('');
-          }
+          // No token returned by /auth/register/ — send the user through a
+          // real OTP login rather than guessing a fixed '000000' code.
+          // That fallback either always failed (wasted request) or, if the
+          // backend ever ships a fixed test OTP for dev convenience, would
+          // have hardcoded an auth bypass into the client bundle.
+          setSuccess('Registration successful! Please verify your mobile number to log in.');
+          setCurrentView('login');
+          setOtpSent(false);
+          setIsVerified(false);
+          setMobile(regData.mobile_number || '');
         }
       } else {
         const errorMsg = typeof data === 'object'
@@ -955,6 +857,24 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         setPendingBooking(data);
+        setPaymentIntentError('');
+        setPaymentClientSecret(null);
+
+        // Create the real Stripe PaymentIntent up front so the CardElement
+        // form can confirm against it. Previously this was never called —
+        // the old form faked a payment_intent_id client-side instead.
+        try {
+          const intentResponse = await api.createPaymentIntent(token, data.id);
+          const intentData = await intentResponse.json();
+          if (intentResponse.ok && intentData.client_secret) {
+            setPaymentClientSecret(intentData.client_secret);
+          } else {
+            setPaymentIntentError(intentData.error || 'Could not initialize payment.');
+          }
+        } catch (intentErr) {
+          setPaymentIntentError('Could not initialize payment. Please try again.');
+        }
+
         setShowPayment(true);
       } else {
         setError('Failed to create booking');
@@ -968,7 +888,9 @@ function App() {
     try {
       const response = await api.confirmPayment(token, {
         booking_id: pendingBooking.id,
-        payment_intent_id: paymentData?.paymentIntentId || `pi_dev_${Date.now()}`,
+        // Always the real Stripe PaymentIntent id returned by
+        // stripe.confirmCardPayment() — never a client-fabricated string.
+        payment_intent_id: paymentData.paymentIntentId,
         payment_method: paymentData?.mode || 'card'
       });
 
@@ -986,6 +908,7 @@ function App() {
         });
         setShowPayment(false);
         setPendingBooking(null);
+        setPaymentClientSecret(null);
         setSelectedSlot(null);
         setLockedSlot(null);
         setCurrentView('booking-confirmed');
@@ -1855,14 +1778,33 @@ function App() {
         {showPayment && pendingBooking && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="max-w-md w-full">
-              <StripePaymentForm
-                amount={pendingBooking.amount}
-                onSuccess={handlePaymentSuccess}
-                onCancel={() => {
-                  setShowPayment(false);
-                  setError('Payment cancelled. Your slot will be released.');
-                }}
-              />
+              {paymentIntentError ? (
+                <div className="bg-white p-6 rounded-lg shadow-lg text-center">
+                  <p className="text-red-600 mb-4">{paymentIntentError}</p>
+                  <button
+                    onClick={() => { setShowPayment(false); setError('Payment could not be started. Your slot will be released.'); }}
+                    className="px-5 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : paymentClientSecret ? (
+                <Elements stripe={stripePromise}>
+                  <StripePaymentForm
+                    amount={pendingBooking.amount}
+                    clientSecret={paymentClientSecret}
+                    onSuccess={handlePaymentSuccess}
+                    onCancel={() => {
+                      setShowPayment(false);
+                      setError('Payment cancelled. Your slot will be released.');
+                    }}
+                  />
+                </Elements>
+              ) : (
+                <div className="bg-white p-6 rounded-lg shadow-lg text-center text-gray-500">
+                  Initializing payment…
+                </div>
+              )}
             </div>
           </div>
         )}

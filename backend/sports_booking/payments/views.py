@@ -48,8 +48,7 @@ def create_payment_intent(request):
         booking = Booking.objects.select_related('club', 'sport').get(id=booking_id, user=request.user)
         if booking.status != 'pending':
             return Response({'error': 'Booking is not in pending state'}, status=status.HTTP_400_BAD_REQUEST)
-        # if settings.DEBUG:
-        if True:
+        if settings.PAYMENT_DEV_MODE:
             return Response({
                 'client_secret': f'dev_secret_{booking.id}',
                 'payment_intent_id': f'pi_dev_{booking.id}',
@@ -94,10 +93,11 @@ def confirm_payment(request):
         payment_method = serializer.validated_data.get('payment_method', 'card')
         booking = Booking.objects.select_related('club', 'sport').get(id=booking_id, user=request.user)
 
-        # Use dev bypass if DEBUG=True OR if PAYMENT_DEV_MODE env var is set
-        # use_dev_mode = settings.DEBUG or getattr(settings, 'PAYMENT_DEV_MODE', False)
-        use_dev_mode = True
-        if use_dev_mode:
+        # Dev bypass ONLY when the explicit PAYMENT_DEV_MODE setting is on
+        # (never tied to DEBUG — a staging box with DEBUG=True should not
+        # silently start accepting fake payments). This must never be
+        # hardcoded to True in code.
+        if settings.PAYMENT_DEV_MODE:
             with transaction.atomic():
                 Payment.objects.update_or_create(
                     booking=booking,
@@ -126,6 +126,30 @@ def confirm_payment(request):
             }, status=status.HTTP_200_OK)
 
         intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+        # Bind the PaymentIntent to THIS booking before trusting it.
+        # Without this, a user could pay for one (cheap) booking, get a
+        # succeeded PaymentIntent, and replay that same intent id against a
+        # different, more expensive booking they own — intent.status would
+        # still read 'succeeded' with no money ever charged for the second
+        # booking. Both the metadata set in create_payment_intent and the
+        # charged amount must match this specific booking.
+        intent_booking_id = (intent.metadata or {}).get('booking_id')
+        if str(intent_booking_id) != str(booking.id):
+            logger.warning(
+                f"PaymentIntent {payment_intent_id} booking_id mismatch: "
+                f"intent={intent_booking_id} requested={booking.id} user={request.user.id}"
+            )
+            return Response({'error': 'This payment does not match the specified booking'},
+                             status=status.HTTP_400_BAD_REQUEST)
+        if intent.amount != int(booking.amount * 100):
+            logger.warning(
+                f"PaymentIntent {payment_intent_id} amount mismatch: "
+                f"intent={intent.amount} expected={int(booking.amount * 100)} booking={booking.id}"
+            )
+            return Response({'error': 'Payment amount does not match booking amount'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
         if intent.status == 'succeeded':
             with transaction.atomic():
                 payment, created = Payment.objects.get_or_create(

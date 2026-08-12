@@ -8,10 +8,9 @@ import uuid
 
 User = get_user_model()
 
-# Create your models here.
 
 class SlotLock(models.Model):
-    """Temporary lock on time slot during booking process"""
+    """Temporary lock on a time slot while a user completes checkout."""
     club = models.ForeignKey('clubs.Club', on_delete=models.CASCADE)
     sport = models.ForeignKey('clubs.Sport', on_delete=models.CASCADE)
     date = models.DateField()
@@ -20,7 +19,7 @@ class SlotLock(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     locked_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
-    is_converted = models.BooleanField(default=False)   # Converted to booking
+    is_converted = models.BooleanField(default=False)  # Converted to a paid booking
 
     class Meta:
         db_table = 'slot_locks'
@@ -33,14 +32,14 @@ class SlotLock(models.Model):
 
     def is_expired(self):
         return timezone.now() > self.expires_at
-    
+
     def save(self, *args, **kwargs):
         if not self.expires_at:
             self.expires_at = timezone.now() + timedelta(
                 seconds=getattr(settings, 'SLOT_LOCK_DURATION', 600)
             )
         super().save(*args, **kwargs)
-    
+
     def __str__(self):
         return f"{self.club.name} - {self.date} {self.start_time}"
 
@@ -51,13 +50,6 @@ class Booking(models.Model):
         ('confirmed', 'Confirmed'),
         ('cancelled', 'Cancelled'),
         ('completed', 'Completed'),
-        ('refunded', 'Refunded'),
-    ]
-
-    PAYMENT_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
         ('refunded', 'Refunded'),
     ]
 
@@ -75,14 +67,12 @@ class Booking(models.Model):
     admin_notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    lock = models.ForeignKey(SlotLock, on_delete=models.SET_NULL, null=True, blank=True, related_name='booking')
-
-    """# Cancellation details
-    cancelled_at = models.DateTimeField(null=True, blank=True)
-    cancellation_reason = models.TextField(blank=True)
-
-    # Admin Fields
-    admin_notes = models.TextField(blank=True)"""
+    # unique=True: DB-level guarantee that a lock can never back two bookings,
+    # even if application logic (is_converted checks) has a bug or races.
+    lock = models.OneToOneField(
+        SlotLock, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='booking'
+    )
 
     class Meta:
         db_table = 'bookings'
@@ -95,24 +85,49 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.club.name} - {self.date}"
-    
-    # Added clean() to validate time logic at model level
+
     def clean(self):
-        if self.start_time and self.end_time and self.start_time >= self.end_time:
-            raise ValidationError("start_time must be before end_time")
-        if self.date and self.date < timezone.now().date():
-            raise ValidationError("Booking date cannot be in the past")
-    
-    # Added cancel() method — was missing, needed for cancellation flow
-    def cancel(self, reason=''):
-        self.status = 'cancelled'
+        super().clean()
+
+        if self.start_time >= self.end_time:
+            raise ValidationError(
+                "start_time must be before end_time"
+            )
+
+        if self.date < timezone.now().date():
+            raise ValidationError(
+                "Booking date cannot be in the past"
+            )
+
+        overlapping = Booking.objects.filter(
+            club=self.club,
+            sport=self.sport,
+            date=self.date,
+            status__in=["pending", "confirmed"],
+            start_time__lt=self.end_time,
+            end_time__gt=self.start_time,
+        )
+
+        if self.pk:
+            overlapping = overlapping.exclude(pk=self.pk)
+
+        if overlapping.exists():
+            raise ValidationError(
+                "Selected slot is already booked."
+            )
+
+    def cancel(self, reason=""):
+        if self.status == "cancelled":
+            return
+
+        self.status = "cancelled"
         self.cancelled_at = timezone.now()
         self.cancellation_reason = reason
-        self.save(update_fields=['status', 'cancelled_at', 'cancellation_reason','updated_at'])
-        
-    
+        self.save()
+
+
 class SlotWaitlist(models.Model):
-    # track user who tried to book a locked slot
+    """Track users who tried to book a slot that was locked by someone else."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='waitlisted_slots')
     club = models.ForeignKey('clubs.Club', on_delete=models.CASCADE)
     sport = models.ForeignKey('clubs.Sport', on_delete=models.CASCADE)
@@ -124,8 +139,7 @@ class SlotWaitlist(models.Model):
 
     class Meta:
         db_table = 'slot_waitlist'
-        ordering = ['created_at']   # First come, first notified
-        # Added unique_together to prevent duplicate waitlist entries per user/slot
+        ordering = ["created_at"]  # First come, first notified
         unique_together = ['user', 'club', 'sport', 'date', 'start_time', 'end_time']
         indexes = [
             models.Index(fields=['club', 'sport', 'date', 'start_time']),
@@ -134,4 +148,3 @@ class SlotWaitlist(models.Model):
 
     def __str__(self):
         return f"{self.user.username} waiting for {self.club.name} - {self.date} {self.start_time}"
-    
