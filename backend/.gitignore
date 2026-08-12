@@ -11,4 +11,6 @@ logs/
 .vscode/
 
 # Celery
-celerybeat-schedule*
+celerybeat-schedule**.sqlite3
+dump.rdb
+media/
