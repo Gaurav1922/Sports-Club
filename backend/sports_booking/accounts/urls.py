@@ -34,7 +34,7 @@ urlpatterns = [
     path('admin/dashboard-stats/', views.dashboard_stats, name='dashboard_stats'),
     path('admin/monthly-report/', views.monthly_report, name='monthly_report'),
     path('admin/bookings/', views.all_bookings, name='admin_all_bookings'),
-    path('admin/bookings/<int:booking_id>/status/', views.update_booking_status, name='update_booking_status'),
+    path('admin/bookings/<uuid:booking_id>/status/', views.update_booking_status, name='update_booking_status'),
     path('admin/users/', views.all_users, name='admin_all_users'),
     path('admin-login/', views.admin_login, name='admin_login'),
 

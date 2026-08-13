@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Calendar, Clock, MapPin, User, LogOut, CreditCard, Search, Menu, X, Star, Users, TrendingUp, DollarSign, Plus, Edit, Trash2, Lock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
-import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
@@ -220,7 +220,6 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
   const elements = useElements();
   const [processing, setProcessing] = useState(false);
   const [formError, setFormError] = useState('');
-  const [cardName, setCardName] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -230,23 +229,29 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
       setFormError('Payment is still initializing — please wait a moment and try again.');
       return;
     }
-    if (!cardName.trim()) {
-      setFormError('Enter the cardholder name.');
+
+    setProcessing(true);
+
+    const { error: submitError } = await elements.submit();
+    if (submitError) {
+      setProcessing(false);
+      setFormError(submitError.message || 'Please check your payment details.');
       return;
     }
 
-    setProcessing(true);
-    const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-      payment_method: {
-        card: elements.getElement(CardElement),
-        billing_details: { name: cardName.trim() },
+    const { error, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      clientSecret,
+      confirmParams: {
+        return_url: `${window.location.origin}/payment-complete`,
       },
+      redirect: 'if_required',
     });
 
     setProcessing(false);
 
     if (error) {
-      setFormError(error.message || 'Payment failed. Please check your card details.');
+      setFormError(error.message || 'Payment failed. Please check your details.');
       return;
     }
     if (paymentIntent && paymentIntent.status === 'succeeded') {
@@ -264,17 +269,7 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
       {formError && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm mb-3">{formError}</div>}
 
       <div className="space-y-3">
-        <div>
-          <label className="block text-sm font-medium mb-1">Cardholder Name</label>
-          <input type="text" value={cardName} onChange={e => setCardName(e.target.value)}
-            placeholder="Name on card" className="w-full px-3 py-2 border rounded-lg text-sm" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Card Details</label>
-          <div className="w-full px-3 py-3 border rounded-lg">
-            <CardElement options={CARD_ELEMENT_OPTIONS} />
-          </div>
-        </div>
+        <PaymentElement />
       </div>
 
       <div className="flex gap-3 mt-5">
@@ -1789,7 +1784,7 @@ function App() {
                   </button>
                 </div>
               ) : paymentClientSecret ? (
-                <Elements stripe={stripePromise}>
+                <Elements stripe={stripePromise} options={{ clientSecret: paymentClientSecret }}>
                   <StripePaymentForm
                     amount={pendingBooking.amount}
                     clientSecret={paymentClientSecret}

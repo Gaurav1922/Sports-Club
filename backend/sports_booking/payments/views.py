@@ -60,6 +60,7 @@ def create_payment_intent(request):
             currency='inr',
             metadata={'booking_id': booking.id, 'user_id': request.user.id},
             description=f"Booking at {booking.club.name} for {booking.sport.name}",
+            automatic_payment_methods={'enabled': True},
         )
         Payment.objects.create(
             booking=booking,
