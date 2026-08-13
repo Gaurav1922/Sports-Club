@@ -21,3 +21,16 @@ if not User.objects.filter(username='admin').exists():
 else:
     print('Superuser already exists')
 "
+
+python manage.py shell -c "
+from django.contrib.auth import get_user_model
+import os
+User = get_user_model()
+new_password = os.environ.get('DJANGO_SUPERUSER_PASSWORD')
+if new_password:
+    u = User.objects.filter(username='admin').first()
+    if u:
+        u.set_password(new_password)
+        u.save()
+        print('Admin password reset')
+"
