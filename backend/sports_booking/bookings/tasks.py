@@ -68,7 +68,6 @@ def send_booking_confirmation_sms(booking_id):
             logger.info(f"No mobile for user {user.username}, skipping SMS")
             return "No mobile number"
 
-        # Only send if Twilio is configured
         twilio_sid = getattr(settings, 'TWILIO_ACCOUNT_SID', None)
         twilio_token = getattr(settings, 'TWILIO_AUTH_TOKEN', None)
         twilio_from = getattr(settings, 'TWILIO_PHONE_NUMBER', None)
@@ -105,7 +104,6 @@ def send_otp_sms_task(mobile_number, otp_code):
 
         if not all([twilio_sid, twilio_token, twilio_from]) or twilio_sid == 'None':
             logger.info(f"DEV OTP for {mobile_number}: {otp_code}")
-            print(f"\n{'='*40}\nDEV OTP for {mobile_number}: {otp_code}\n{'='*40}\n")
             return "Dev mode - OTP logged"
 
         from twilio.rest import Client
@@ -161,26 +159,18 @@ def release_expired_slot_locks():
     """Periodic task: release expired slot locks and cancel pending bookings"""
     try:
         from bookings.models import SlotLock, Booking
-        expired_locks = SlotLock.objects.filter(
-            expires_at__lt=timezone.now(),
-            is_converted=False
-        )
-        count = expired_locks.count()
+        expired_locks = list(SlotLock.objects.filter(expires_at__lt=timezone.now(), is_converted=False))
+        count = len(expired_locks)
         for lock in expired_locks:
             Booking.objects.filter(
-                club=lock.club,
-                sport=lock.sport,
-                date=lock.date,
-                start_time=lock.start_time,
-                status='pending'
+                club=lock.club, sport=lock.sport, date=lock.date,
+                start_time=lock.start_time, status='pending'
             ).update(status='cancelled')
-        expired_locks.delete()
+        SlotLock.objects.filter(id__in=[l.id for l in expired_locks]).delete()
 
-        # Also cancel stale pending bookings older than 15 minutes
         cutoff = timezone.now() - timedelta(minutes=15)
         stale_count = Booking.objects.filter(
-            status='pending',
-            created_at__lt=cutoff
+            status='pending', created_at__lt=cutoff
         ).update(status='cancelled')
 
         logger.info(f"Released {count} expired locks, cancelled {stale_count} stale bookings")
@@ -188,4 +178,51 @@ def release_expired_slot_locks():
 
     except Exception as e:
         logger.error(f"Slot lock cleanup failed: {e}")
+        return f"Failed: {str(e)}"
+
+
+@shared_task
+def notify_waitlisted_users(club_id, sport_id, date_str, start_time, end_time):
+    """
+    Notify every user waitlisted for a specific slot that it has just
+    become available again (called after a cancellation or lock expiry).
+    Was imported by admin.py but never defined — that import would have
+    raised ImportError the first time an admin used the action.
+    """
+    try:
+        from bookings.models import SlotWaitlist
+        from datetime import datetime as dt
+
+        date = dt.strptime(date_str, '%Y-%m-%d').date()
+        entries = SlotWaitlist.objects.filter(
+            club_id=club_id, sport_id=sport_id, date=date,
+            start_time=start_time, notified=False
+        ).select_related('user', 'club', 'sport')
+
+        notified_count = 0
+        for entry in entries:
+            user = entry.user
+            if user.email:
+                send_mail(
+                    subject=f'Slot now available - {entry.club.name}',
+                    message=(
+                        f"Good news! The slot you waitlisted for is now available:\n\n"
+                        f"Club: {entry.club.name}\n"
+                        f"Sport: {entry.sport.name}\n"
+                        f"Date: {entry.date}\n"
+                        f"Time: {entry.start_time} - {entry.end_time}\n\n"
+                        f"Book it quickly before someone else does!"
+                    ),
+                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@sportsclub.com'),
+                    recipient_list=[user.email],
+                    fail_silently=True,
+                )
+            entry.notified = True
+            entry.save(update_fields=['notified'])
+            notified_count += 1
+
+        return f"Notified {notified_count} waitlisted users"
+
+    except Exception as e:
+        logger.error(f"Waitlist notification failed: {e}")
         return f"Failed: {str(e)}"
