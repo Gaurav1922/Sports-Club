@@ -41,15 +41,19 @@ Best regards,
 Sports Club Team
         """
 
-        send_mail(
+        sent_count = send_mail(
             subject,
             message,
             getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@sportsclub.com'),
             [user.email],
-            fail_silently=True,
+            fail_silently=False,
         )
-        logger.info(f"Confirmation email sent to {user.email} for booking {booking_id}")
-        return f"Email sent to {user.email}"
+        if sent_count:
+            logger.info(f"Confirmation email sent to {user.email} for booking {booking_id}")
+            return f"Email sent to {user.email}"
+        else:
+            logger.error(f"Email send returned 0 for {user.email}, booking {booking_id}")
+            return "Send returned 0"
 
     except Exception as e:
         logger.error(f"Failed to send confirmation email for booking {booking_id}: {e}")
