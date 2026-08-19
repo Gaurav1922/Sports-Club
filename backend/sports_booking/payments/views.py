@@ -62,12 +62,14 @@ def create_payment_intent(request):
             description=f"Booking at {booking.club.name} for {booking.sport.name}",
             automatic_payment_methods={'enabled': True},
         )
-        Payment.objects.create(
+        Payment.objects.update_or_create(
             booking=booking,
-            stripe_payment_intent_id=intent.id,
-            amount=booking.amount,
-            currency='INR',
-            status='pending',
+            defaults={
+                'stripe_payment_intent_id': intent.id,
+                'amount': booking.amount,
+                'currency': 'INR',
+                'status': 'pending',
+            }
         )
         return Response({
             'client_secret': intent.client_secret,
@@ -156,10 +158,17 @@ def confirm_payment(request):
                 payment, created = Payment.objects.get_or_create(
                     booking=booking,
                     stripe_payment_intent_id=payment_intent_id,
-                    defaults={'amount': booking.amount, 'currency': 'INR', 'status': 'completed', 'completed_at': timezone.now()}
+                    defaults={
+                        'amount': booking.amount,
+                        'currency': 'INR',
+                        'status': 'completed',
+                        'payment_method': payment_method,
+                        'completed_at': timezone.now(),
+                    }
                 )
                 if not created:
                     payment.status = 'completed'
+                    payment.payment_method = payment_method
                     payment.completed_at = timezone.now()
                     payment.save()
                 booking.status = 'confirmed'
@@ -197,7 +206,7 @@ def stripe_webhook(request):
                 Payment.objects.update_or_create(
                     booking=booking,
                     stripe_payment_intent_id=payment_intent['id'],
-                    defaults={'amount': booking.amount, 'currency': 'INR', 'status': 'completed', 'completed_at': timezone.now()}
+                    defaults={'amount': booking.amount, 'currency': 'INR', 'status': 'completed', 'payment_method': payment_intent['payment_method_types'][0] if payment_intent['payment_method_types'] else 'card', 'completed_at': timezone.now()}
                 )
                 if booking.status != 'confirmed':
                     booking.status = 'confirmed'

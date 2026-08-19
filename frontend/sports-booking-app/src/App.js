@@ -220,6 +220,7 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
   const elements = useElements();
   const [processing, setProcessing] = useState(false);
   const [formError, setFormError] = useState('');
+  const [selectedMethod, setSelectedMethod] = useState('card')
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -243,7 +244,7 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
       elements,
       clientSecret,
       confirmParams: {
-        return_url: `${window.location.origin}/payment-complete`,
+        return_url: window.location.origin,
       },
       redirect: 'if_required',
     });
@@ -255,7 +256,7 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
       return;
     }
     if (paymentIntent && paymentIntent.status === 'succeeded') {
-      onSuccess({ paymentIntentId: paymentIntent.id, mode: 'card' });
+      onSuccess({ paymentIntentId: paymentIntent.id, mode: selectedMethod });
     } else {
       setFormError(`Payment status: ${paymentIntent?.status || 'unknown'}. Please try again.`);
     }
@@ -269,8 +270,10 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
       {formError && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm mb-3">{formError}</div>}
 
       <div className="space-y-3">
-        <PaymentElement />
-      </div>
+        <PaymentElement onChange={(event) => {
+          console.log('Payment method changed to:', event.value.type);
+          setSelectedMethod(event.value.type);
+        }} />      </div>
 
       <div className="flex gap-3 mt-5">
         <button type="submit" disabled={processing || !stripe}
@@ -281,6 +284,7 @@ const StripePaymentForm = ({ amount, clientSecret, onSuccess, onCancel }) => {
           Cancel
         </button>
       </div>
+
       <p className="text-xs text-gray-400 mt-3 text-center">🔒 Payments are processed securely by Stripe — your card details never touch our servers.</p>
     </form>
   );
@@ -436,11 +440,48 @@ function App() {
       return () => clearTimeout(timer);
     }
   }, [error, success]);
+  // Detect return from a redirect-based payment (UPI/NetBanking) and
+  // finish confirming the booking, since a full page reload means the
+  // in-app onSuccess callback never ran for these payment methods.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const clientSecret = params.get('payment_intent_client_secret');
+    const paymentIntentId = params.get('payment_intent');
+
+    if (clientSecret && paymentIntentId) {
+      stripePromise.then(async (stripeInstance) => {
+        const { paymentIntent } = await stripeInstance.retrievePaymentIntent(clientSecret);
+
+        if (paymentIntent && paymentIntent.status === 'succeeded') {
+          const storedBookingId = localStorage.getItem('pendingBookingId');
+          const storedToken = localStorage.getItem('token');
+
+          if (storedBookingId && storedToken) {
+            try {
+              const response = await api.confirmPayment(storedToken, {
+                booking_id: storedBookingId,
+                payment_intent_id: paymentIntent.id,
+                payment_method: paymentIntent.payment_method_types?.[0] || 'card',
+              });
+              if (response.ok) {
+                alert('Booking confirmed! Payment successful.');
+              }
+            } catch (e) {
+              console.error('Failed to confirm redirected payment', e);
+            } finally {
+              localStorage.removeItem('pendingBookingId');
+            }
+          }
+        }
+        window.history.replaceState({}, '', window.location.pathname);
+      });
+    }
+  }, []);
 
   // On mount — restore session + ping server to keep it warm
   useEffect(() => {
     // Keep-alive: ping health endpoint so server wakes up instantly for users
-    fetch(`${API_BASE_URL.replace('/api', '')}/api/auth/health/`).catch(() => {});
+    fetch(`${API_BASE_URL.replace('/api', '')}/api/auth/health/`).catch(() => { });
 
     const savedToken = localStorage.getItem('token');
     if (savedToken) {
@@ -859,6 +900,7 @@ function App() {
         // form can confirm against it. Previously this was never called —
         // the old form faked a payment_intent_id client-side instead.
         try {
+          localStorage.setItem('pendingBookingId', data.id);
           const intentResponse = await api.createPaymentIntent(token, data.id);
           const intentData = await intentResponse.json();
           if (intentResponse.ok && intentData.client_secret) {
@@ -905,6 +947,7 @@ function App() {
         setPendingBooking(null);
         setPaymentClientSecret(null);
         setSelectedSlot(null);
+        localStorage.removeItem('pendingBookingId');
         setLockedSlot(null);
         setCurrentView('booking-confirmed');
         loadBookings();
@@ -1557,15 +1600,15 @@ function App() {
                     <label className="block text-xs font-medium mb-1 text-gray-600">Month</label>
                     <select value={reportMonth} onChange={e => setReportMonth(parseInt(e.target.value))}
                       className="px-3 py-2 border rounded-lg text-sm bg-white">
-                      {['January','February','March','April','May','June','July','August','September','October','November','December']
-                        .map((m, i) => <option key={i} value={i+1}>{m}</option>)}
+                      {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+                        .map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1 text-gray-600">Year</label>
                     <select value={reportYear} onChange={e => setReportYear(parseInt(e.target.value))}
                       className="px-3 py-2 border rounded-lg text-sm bg-white">
-                      {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+                      {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
                   </div>
                   <button
@@ -1920,14 +1963,13 @@ function App() {
                     <div className="divide-y divide-gray-50">
                       {(dashboardStats.recent_activities || []).slice(0, 7).map((activity, i) => (
                         <div key={i} className="flex items-center gap-2 py-1.5">
-                          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                            activity.type === 'confirmed' ? 'bg-green-500' :
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${activity.type === 'confirmed' ? 'bg-green-500' :
                             activity.type === 'cancelled' ? 'bg-red-400' :
-                            activity.type === 'refunded' ? 'bg-blue-500' :
-                            activity.type === 'club_added' ? 'bg-purple-500' :
-                            activity.type === 'sport_added' ? 'bg-orange-400' :
-                            'bg-yellow-400'
-                          }`} />
+                              activity.type === 'refunded' ? 'bg-blue-500' :
+                                activity.type === 'club_added' ? 'bg-purple-500' :
+                                  activity.type === 'sport_added' ? 'bg-orange-400' :
+                                    'bg-yellow-400'
+                            }`} />
                           <p className="text-xs text-gray-700 flex-1 truncate">{activity.message}</p>
                           <span className="text-xs text-gray-400 flex-shrink-0">{activity.time}</span>
                           {activity.amount && (
@@ -1956,9 +1998,8 @@ function App() {
                 const count = tab === 'all' ? allBookings.length : allBookings.filter(b => b.status === tab).length;
                 return (
                   <button key={tab} onClick={() => setAdminBookingFilter(tab)}
-                    className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition ${
-                      adminBookingFilter === tab ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
-                    }`}>
+                    className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition ${adminBookingFilter === tab ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
+                      }`}>
                     {tab.charAt(0).toUpperCase() + tab.slice(1)}
                     <span className="ml-1 text-xs opacity-80">({count})</span>
                   </button>
@@ -2013,31 +2054,29 @@ function App() {
                             </td>
                             <td className="px-4 py-3 text-sm">
                               {booking.payment_method ? (
-                                <span className={`px-2 py-1 text-xs rounded-full font-medium ${
-                                  booking.payment_method === 'card' ? 'bg-purple-100 text-purple-700' :
+                                <span className={`px-2 py-1 text-xs rounded-full font-medium ${booking.payment_method === 'card' ? 'bg-purple-100 text-purple-700' :
                                   booking.payment_method === 'upi' ? 'bg-green-100 text-green-700' :
-                                  booking.payment_method === 'netbanking' ? 'bg-blue-100 text-blue-700' :
-                                  booking.payment_method === 'wallet' ? 'bg-orange-100 text-orange-700' :
-                                  'bg-gray-100 text-gray-600'
-                                }`}>
+                                    booking.payment_method === 'netbanking' ? 'bg-blue-100 text-blue-700' :
+                                      booking.payment_method === 'wallet' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-gray-100 text-gray-600'
+                                  }`}>
                                   {booking.payment_method === 'card' ? '💳 Card' :
-                                   booking.payment_method === 'upi' ? '📱 UPI' :
-                                   booking.payment_method === 'netbanking' ? '🏦 NetBanking' :
-                                   booking.payment_method === 'wallet' ? '👛 Wallet' :
-                                   booking.payment_method}
+                                    booking.payment_method === 'upi' ? '📱 UPI' :
+                                      booking.payment_method === 'netbanking' ? '🏦 NetBanking' :
+                                        booking.payment_method === 'wallet' ? '👛 Wallet' :
+                                          booking.payment_method}
                                 </span>
                               ) : (
                                 <span className="text-gray-400 text-xs">—</span>
                               )}
                             </td>
                             <td className="px-4 py-3">
-                              <span className={`px-2 py-1 text-xs rounded-full font-medium ${
-                                booking.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                              <span className={`px-2 py-1 text-xs rounded-full font-medium ${booking.status === 'confirmed' ? 'bg-green-100 text-green-800' :
                                 booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                booking.status === 'refunded' ? 'bg-blue-100 text-blue-800' :
-                                booking.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
+                                  booking.status === 'refunded' ? 'bg-blue-100 text-blue-800' :
+                                    booking.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                      'bg-gray-100 text-gray-800'
+                                }`}>
                                 {booking.status}
                               </span>
                             </td>
@@ -2442,8 +2481,8 @@ function App() {
                 <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
                   <span>
                     {bookingConfirmation.paymentMode === 'card' ? '💳' :
-                     bookingConfirmation.paymentMode === 'upi' ? '📱' :
-                     bookingConfirmation.paymentMode === 'netbanking' ? '🏦' : '👛'}
+                      bookingConfirmation.paymentMode === 'upi' ? '📱' :
+                        bookingConfirmation.paymentMode === 'netbanking' ? '🏦' : '👛'}
                   </span>
                   <span>Paid via <strong className="text-gray-700 capitalize">{bookingConfirmation.paymentMode}</strong></span>
                 </div>
@@ -2541,7 +2580,7 @@ function App() {
                           const fullClub = await res.json();
                           setSelectedClub(fullClub);
                         }
-                      } catch (e) {}
+                      } catch (e) { }
                       setCurrentView('book-slot');
                     }}
                     className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 mb-4"
@@ -2774,13 +2813,12 @@ function App() {
                         key={index}
                         onClick={() => handleSlotSelection(slot)}
                         disabled={slot.is_locked || slot.is_booked || slot.is_past}
-                        className={`p-3 rounded-lg border-2 transition ${
-                          slot.is_past ? 'border-gray-200 bg-gray-50 text-gray-300 cursor-not-allowed' :
+                        className={`p-3 rounded-lg border-2 transition ${slot.is_past ? 'border-gray-200 bg-gray-50 text-gray-300 cursor-not-allowed' :
                           slot.is_booked ? 'border-red-300 bg-red-50 text-red-400 cursor-not-allowed' :
-                          slot.is_locked ? 'border-yellow-300 bg-yellow-50 text-yellow-600 cursor-not-allowed' :
-                          selectedSlot?.start_time === slot.start_time ? 'border-indigo-600 bg-indigo-50 text-indigo-700' :
-                          'border-gray-300 hover:border-indigo-400 hover:bg-indigo-50'
-                        }`}
+                            slot.is_locked ? 'border-yellow-300 bg-yellow-50 text-yellow-600 cursor-not-allowed' :
+                              selectedSlot?.start_time === slot.start_time ? 'border-indigo-600 bg-indigo-50 text-indigo-700' :
+                                'border-gray-300 hover:border-indigo-400 hover:bg-indigo-50'
+                          }`}
                       >
                         <div className="text-sm font-semibold">{slot.start_time}</div>
                         <div className="text-xs">{slot.end_time}</div>
@@ -2831,11 +2869,10 @@ function App() {
                 <button
                   key={tab}
                   onClick={() => setBookingFilter(tab)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition ${
-                    bookingFilter === tab
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
-                  }`}
+                  className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition ${bookingFilter === tab
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   {tab === 'all' ? 'All' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                   <span className="ml-1 text-xs">
@@ -2866,20 +2903,19 @@ function App() {
                     <div key={booking.id} className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100">
 
                       {/* Card Header — gradient based on status */}
-                      <div className={`px-5 py-4 ${
-                        booking.status === 'confirmed' ? 'bg-gradient-to-r from-indigo-600 to-purple-600' :
+                      <div className={`px-5 py-4 ${booking.status === 'confirmed' ? 'bg-gradient-to-r from-indigo-600 to-purple-600' :
                         booking.status === 'pending' ? 'bg-gradient-to-r from-yellow-500 to-orange-500' :
-                        booking.status === 'refunded' ? 'bg-gradient-to-r from-blue-500 to-cyan-500' :
-                        booking.status === 'cancelled' ? 'bg-gradient-to-r from-gray-400 to-gray-500' :
-                        'bg-gradient-to-r from-indigo-500 to-purple-500'
-                      } text-white`}>
+                          booking.status === 'refunded' ? 'bg-gradient-to-r from-blue-500 to-cyan-500' :
+                            booking.status === 'cancelled' ? 'bg-gradient-to-r from-gray-400 to-gray-500' :
+                              'bg-gradient-to-r from-indigo-500 to-purple-500'
+                        } text-white`}>
                         <div className="flex justify-between items-start">
                           <div>
                             <p className="text-white text-opacity-80 text-xs font-medium uppercase tracking-wide">
                               {booking.status === 'confirmed' ? '✓ Booking Confirmed' :
-                               booking.status === 'pending' ? '⏳ Payment Pending' :
-                               booking.status === 'refunded' ? '↩ Refund Processed' :
-                               booking.status === 'cancelled' ? '✕ Booking Cancelled' : booking.status}
+                                booking.status === 'pending' ? '⏳ Payment Pending' :
+                                  booking.status === 'refunded' ? '↩ Refund Processed' :
+                                    booking.status === 'cancelled' ? '✕ Booking Cancelled' : booking.status}
                             </p>
                             <h3 className="text-lg font-bold mt-0.5">{booking.club_name}</h3>
                             <p className="text-white text-sm opacity-80">{booking.sport_name}</p>
@@ -2902,7 +2938,7 @@ function App() {
                         <div className="px-4 py-3 text-center">
                           <p className="text-xs text-gray-400 mb-0.5">Time Slot</p>
                           <p className="text-sm font-bold text-gray-800">
-                            {booking.start_time?.slice(0,5)} – {booking.end_time?.slice(0,5)}
+                            {booking.start_time?.slice(0, 5)} – {booking.end_time?.slice(0, 5)}
                           </p>
                         </div>
                         <div className="px-4 py-3 text-center">
@@ -2914,10 +2950,10 @@ function App() {
                           <p className="text-sm font-bold text-gray-800 capitalize">
                             {booking.payment_method
                               ? (booking.payment_method === 'card' ? '💳 Card' :
-                                 booking.payment_method === 'upi' ? '📱 UPI' :
-                                 booking.payment_method === 'netbanking' ? '🏦 NetBanking' :
-                                 booking.payment_method === 'wallet' ? '👛 Wallet' :
-                                 booking.payment_method)
+                                booking.payment_method === 'upi' ? '📱 UPI' :
+                                  booking.payment_method === 'netbanking' ? '🏦 NetBanking' :
+                                    booking.payment_method === 'wallet' ? '👛 Wallet' :
+                                      booking.payment_method)
                               : '—'}
                           </p>
                         </div>
@@ -2958,7 +2994,24 @@ function App() {
                             </div>
                             <div className="flex gap-2">
                               <button
-                                onClick={() => { setPendingBooking(booking); setShowPayment(true); }}
+                                onClick={async () => {
+                                  setPendingBooking(booking);
+                                  setPaymentClientSecret(null);
+                                  setPaymentIntentError('');
+                                  try {
+                                    const intentResponse = await api.createPaymentIntent(token, booking.id);
+                                    const intentData = await intentResponse.json();
+                                    if (intentResponse.ok && intentData.client_secret) {
+                                      setPaymentClientSecret(intentData.client_secret);
+                                      localStorage.setItem('pendingBookingId', booking.id);
+                                    } else {
+                                      setPaymentIntentError(intentData.error || 'Could not initialize payment.');
+                                    }
+                                  } catch (err) {
+                                    setPaymentIntentError('Could not initialize payment. Please try again.');
+                                  }
+                                  setShowPayment(true);
+                                }}
                                 className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm"
                               >
                                 Complete Payment — ₹{booking.amount}

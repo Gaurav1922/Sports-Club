@@ -226,3 +226,33 @@ def notify_waitlisted_users(club_id, sport_id, date_str, start_time, end_time):
     except Exception as e:
         logger.error(f"Waitlist notification failed: {e}")
         return f"Failed: {str(e)}"
+    
+@shared_task
+def send_booking_status_update(booking_id, new_status):
+    """Notify the user their booking status was changed by an admin."""
+    try:
+        from bookings.models import Booking
+        booking = Booking.objects.select_related('user', 'club', 'sport').get(id=booking_id)
+        user = booking.user
+
+        subject = f"Your booking status has been updated to: {new_status}"
+        message = (
+            f"Hi {user.get_full_name() or user.username},\n\n"
+            f"Your booking for {booking.sport.name} at {booking.club.name} "
+            f"on {booking.date} ({booking.start_time}-{booking.end_time}) "
+            f"has been updated to: {new_status}.\n\n"
+            f"Thanks,\nSports Club Team"
+        )
+
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+        logger.info(f"Status update email sent to {user.email} for booking {booking_id}")
+        return "Sent"
+    except Exception as e:
+        logger.error(f"Failed to send status update email for booking {booking_id}: {e}")
+        return f"Failed: {str(e)}"
