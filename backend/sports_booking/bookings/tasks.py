@@ -1,5 +1,5 @@
 from celery import shared_task
-from django.core.mail import send_mail
+from common.email_utils import send_resend_email
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
@@ -41,14 +41,8 @@ Best regards,
 Sports Club Team
         """
 
-        sent_count = send_mail(
-            subject,
-            message,
-            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@sportsclub.com'),
-            [user.email],
-            fail_silently=False,
-        )
-        if sent_count:
+        result = send_resend_email(subject, message, user.email)
+        if result:
             logger.info(f"Confirmation email sent to {user.email} for booking {booking_id}")
             return f"Email sent to {user.email}"
         else:
@@ -135,9 +129,7 @@ def send_welcome_email_task(user_id):
         if not user.email:
             return "No email address"
 
-        send_mail(
-            subject='Welcome to Sports Club!',
-            message=f"""
+        message = f"""
 Dear {user.first_name or user.username},
 
 Welcome to Sports Club! Your account has been created successfully.
@@ -146,11 +138,8 @@ You can now browse and book sports facilities at your favorite clubs.
 
 Best regards,
 Sports Club Team
-            """,
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@sportsclub.com'),
-            recipient_list=[user.email],
-            fail_silently=True,
-        )
+        """
+        send_resend_email('Welcome to Sports Club!', message, user.email)
         return f"Welcome email sent to {user.email}"
 
     except Exception as e:
@@ -207,7 +196,7 @@ def notify_waitlisted_users(club_id, sport_id, date_str, start_time, end_time):
         for entry in entries:
             user = entry.user
             if user.email:
-                send_mail(
+                send_resend_email(
                     subject=f'Slot now available - {entry.club.name}',
                     message=(
                         f"Good news! The slot you waitlisted for is now available:\n\n"
@@ -248,13 +237,7 @@ def send_booking_status_update(booking_id, new_status):
             f"Thanks,\nSports Club Team"
         )
 
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=True,
-        )
+        send_resend_email(subject, message, user.email)
         logger.info(f"Status update email sent to {user.email} for booking {booking_id}")
         return "Sent"
     except Exception as e:

@@ -219,6 +219,8 @@ STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY', default='')
 STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')
 STRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')
 
+RESEND_API_KEY = config('RESEND_API_KEY', default='')
+
 # Admin passcode login (accounts.views.admin_login). Never hardcode this —
 # set it as a Render env var, and do NOT ship the same value inside the
 # React frontend bundle (see frontend review, Phase 6).
@@ -245,6 +247,7 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Sports Club <noreply@
 
 # Slot Locking Configuration
 SLOT_LOCK_DURATION = 600  # 10 minutes in seconds
+
 
 # --------------------------------------------------------------------------
 # Redis / Cache Configuration

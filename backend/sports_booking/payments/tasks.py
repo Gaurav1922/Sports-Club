@@ -1,5 +1,5 @@
 from celery import shared_task
-from django.core.mail import send_mail
+from common.email_utils import send_resend_email
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Count
@@ -42,14 +42,10 @@ def send_payment_confirmation_email(payment_id):
             Sports Club Team
             '''
 
-            send_mail(
-                subject,
-                message,
-                getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@sportsclub.com'),
-                [user.email],
-                fail_silently=True,
-            )
-            return f"Email sent successfully to {user.email}"
+            result = send_resend_email(subject, message, user.email)
+            if result:
+                return f"Email sent successfully to {user.email}"
+            return f"Email send failed for {user.email}"
 
         return "User has no email on file"
 
